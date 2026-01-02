@@ -1,5 +1,6 @@
 #include "csg.h"
 #include <algorithm>
+#include <stack>
 
 struct Event {
     float t;
@@ -80,18 +81,54 @@ std::vector<Span> combineSpans(const std::vector<Span>& left_spans, const std::v
 }
 
 std::vector<Span> CSGNode::getSpans(const Ray& ray) const {
-    if (shape != nullptr) {
-        // Leaf node: delegate to the primitive Shape
-        return shape->getSpans(ray);
-    }
-    else if (left != nullptr && right != nullptr) {
-        // Internal node: recursively get spans from children and combine
-        auto left_spans = left->getSpans(ray);
-        auto right_spans = right->getSpans(ray);
-        return combineSpans(left_spans, right_spans, op);
-    }
-    else {
-        // Invalid node configuration: return empty spans
+    if (this == nullptr) {
         return {};
     }
+
+    std::stack<const CSGNode*> s1, s2;
+    s1.push(this);
+
+    while (!s1.empty()) {
+        const CSGNode* curr = s1.top();
+        s1.pop();
+        s2.push(curr);
+
+        if (curr->left != nullptr) {
+            s1.push(curr->left);
+        }
+        if (curr->right != nullptr) {
+            s1.push(curr->right);
+        }
+    }
+
+    std::stack<std::vector<Span>> value_stack;
+
+    while (!s2.empty()) {
+        const CSGNode* curr = s2.top();
+        s2.pop();
+
+        std::vector<Span> spans;
+        if (curr->shape != nullptr) {
+            // Leaf node: delegate to the primitive Shape
+            spans = curr->shape->getSpans(ray);
+        }
+        else if (curr->left != nullptr && curr->right != nullptr) {
+            // Internal node: combine spans from children
+            std::vector<Span> right_spans = value_stack.top();
+            value_stack.pop();
+            std::vector<Span> left_spans = value_stack.top();
+            value_stack.pop();
+            spans = combineSpans(left_spans, right_spans, curr->op);
+        }
+        else {
+            // Invalid node configuration: return empty spans
+            spans = {};
+        }
+        value_stack.push(spans);
+    }
+
+    if (value_stack.empty()) {
+        return {};
+    }
+    return value_stack.top();
 }
