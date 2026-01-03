@@ -44,8 +44,8 @@ public:
 
 
 struct Light {
-    Vec3 position;
-    Light(const Vec3& pos) : position(pos) {}
+    Vec3 direction;
+    Light(const Vec3& dir) : direction(dir.normalize()) {}
 };
 
 

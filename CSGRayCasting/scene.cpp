@@ -3,15 +3,14 @@
 
 // Calculates color using Phong model
 Color Scene::phongShade(const Vec3& point, const Vec3& normal, const Material mat, const Vec3& view_dir) const {
-    Vec3 l_dir = (light.position - point).normalize();
-    float light_dist = (light.position - point).length();
+    Vec3 l_dir = light.direction;
 
     // Shadow ray
     Ray shadow_ray(point + normal * EPS, l_dir);
     auto shadow_spans = getRoot()->getSpans(shadow_ray);
     bool in_shadow = false;
     for (const auto& s : shadow_spans) {
-        if (s.t_entry > EPS && s.t_entry < light_dist) {
+        if (s.t_entry > EPS) {
             in_shadow = true;
             break;
         }
@@ -80,4 +79,3 @@ void Scene::render(const std::string& filename) {
     }
     out.close();
 }
-

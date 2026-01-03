@@ -83,7 +83,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    Light light(Vec3(5, 5, 0));
+    Light light(Vec3(5, 5, 0));  // Interpreted as direction, will be normalized in constructor
     Camera cam(Vec3(0, 0, 0), Vec3(0, 0, -5), Vec3(0, 1, 0), 60.0f, 800, 600);
     Scene scene(root, light, cam);
 
