@@ -1,3 +1,5 @@
 .vs/
 x64/
 output.ppm
+Thumbs.db
+*.png
