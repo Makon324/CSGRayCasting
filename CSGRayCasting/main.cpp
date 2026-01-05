@@ -88,12 +88,12 @@ int main(int argc, char** argv) {
     Scene scene(root, light, cam);
 
     if (mode == "cpu") {
-        scene.render("output.ppm");
+        scene.renderCPU("output.ppm");
         std::cout << "Rendered to output.ppm using CPU.\n";
     }
     else if (mode == "gpu") {
-        // Placeholder for GPU (e.g., call a GPU renderer function when implemented)
-        std::cout << "GPU rendering not implemented yet.\n";
+        scene.renderGPU("output.ppm");
+        std::cout << "Rendered to output.ppm using GPU.\n";
     }
     else {
         std::cerr << "Invalid mode: use 'cpu' or 'gpu'.\n";

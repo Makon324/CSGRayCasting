@@ -35,6 +35,4 @@ std::vector<Span> Sphere::getSpans(const Ray& ray) const {
     return spans;
 }
 
-Vec3 reflect(const Vec3& incident, const Vec3& normal) {
-    return incident - normal * (2.0f * incident.dot(normal));
-}
+

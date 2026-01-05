@@ -58,7 +58,7 @@ Color Scene::trace(const Ray& ray) const {
     return color;
 }
 
-void Scene::render(const std::string& filename) {
+void Scene::renderCPU(const std::string& filename) {
     std::ofstream out(filename);
     if (!out) return;
     int width = camera.getWidth();
@@ -78,4 +78,132 @@ void Scene::render(const std::string& filename) {
         }
     }
     out.close();
+}
+
+void Scene::renderGPU(const std::string& filename) {
+    HostFlatCSGTree host_flat = flattenTree();
+    size_t num_nodes = host_flat.nodes.size();
+    if (num_nodes == 0) return;
+
+    FlatCSGTree d_tree;
+
+    cudaMalloc(&d_tree.nodes, num_nodes * sizeof(FlatCSGNodeInfo));
+    cudaMemcpy(d_tree.nodes, host_flat.nodes.data(), num_nodes * sizeof(FlatCSGNodeInfo), cudaMemcpyHostToDevice);
+
+    cudaMalloc(&d_tree.data, num_nodes * MAX_SHAPE_DATA_SIZE * sizeof(float));
+    cudaMemcpy(d_tree.data, host_flat.data.data(), num_nodes * MAX_SHAPE_DATA_SIZE * sizeof(float), cudaMemcpyHostToDevice);
+
+    cudaMalloc(&d_tree.red, num_nodes * sizeof(float));
+    cudaMemcpy(d_tree.red, host_flat.red.data(), num_nodes * sizeof(float), cudaMemcpyHostToDevice);
+
+    cudaMalloc(&d_tree.green, num_nodes * sizeof(float));
+    cudaMemcpy(d_tree.green, host_flat.green.data(), num_nodes * sizeof(float), cudaMemcpyHostToDevice);
+
+    cudaMalloc(&d_tree.blue, num_nodes * sizeof(float));
+    cudaMemcpy(d_tree.blue, host_flat.blue.data(), num_nodes * sizeof(float), cudaMemcpyHostToDevice);
+
+    cudaMalloc(&d_tree.specular_coeff, num_nodes * sizeof(float));
+    cudaMemcpy(d_tree.specular_coeff, host_flat.specular_coeff.data(), num_nodes * sizeof(float), cudaMemcpyHostToDevice);
+
+    cudaMalloc(&d_tree.shininess, num_nodes * sizeof(float));
+    cudaMemcpy(d_tree.shininess, host_flat.shininess.data(), num_nodes * sizeof(float), cudaMemcpyHostToDevice);
+
+    cudaMalloc(&d_tree.left_indexes, num_nodes * sizeof(size_t));
+    cudaMemcpy(d_tree.left_indexes, host_flat.left_indexes.data(), num_nodes * sizeof(size_t), cudaMemcpyHostToDevice);
+
+    cudaMalloc(&d_tree.right_indexes, num_nodes * sizeof(size_t));
+    cudaMemcpy(d_tree.right_indexes, host_flat.right_indexes.data(), num_nodes * sizeof(size_t), cudaMemcpyHostToDevice);
+
+    d_tree.num_nodes = num_nodes;
+
+    int width = camera.getWidth();
+    int height = camera.getHeight();
+
+    // Compute shared mem size
+    size_t shared_size = num_nodes * (sizeof(FlatCSGNodeInfo) + MAX_SHAPE_DATA_SIZE * sizeof(float) + 5 * sizeof(float) + 2 * sizeof(size_t));
+
+    unsigned char* d_output;
+    cudaMalloc(&d_output, width * height * 3 * sizeof(unsigned char));
+
+    dim3 block(16, 16);
+    dim3 grid((width + 15) / 16, (height + 15) / 16);
+
+    renderKernel << <grid, block, shared_size >> > (d_output, width, height, camera, light, d_tree);
+
+    unsigned char* h_output = new unsigned char[width * height * 3];
+    cudaMemcpy(h_output, d_output, width * height * 3 * sizeof(unsigned char), cudaMemcpyDeviceToHost);
+
+    // Write PPM
+    std::ofstream out(filename);
+    if (out) {
+        out << "P3\n" << width << " " << height << "\n255\n";
+        for (int j = 0; j < height; ++j) {
+            for (int i = 0; i < width; ++i) {
+                size_t idx = (j * width + i) * 3;
+                out << (int)h_output[idx + 0] << " " << (int)h_output[idx + 1] << " " << (int)h_output[idx + 2] << "\n";
+            }
+        }
+        out.close();
+    }
+
+    delete[] h_output;
+    cudaFree(d_output);
+    cudaFree(d_tree.nodes);
+    cudaFree(d_tree.data);
+    cudaFree(d_tree.red);
+    cudaFree(d_tree.green);
+    cudaFree(d_tree.blue);
+    cudaFree(d_tree.specular_coeff);
+    cudaFree(d_tree.shininess);
+    cudaFree(d_tree.left_indexes);
+    cudaFree(d_tree.right_indexes);
+}
+
+size_t flattenHelper(const CSGNode* node, HostFlatCSGTree& flat) {
+    if (!node) return size_t(-1);
+
+    size_t left_idx = flattenHelper(node->left, flat);
+    size_t right_idx = flattenHelper(node->right, flat);
+
+    size_t curr_idx = flat.nodes.size();
+
+    FlatCSGNodeInfo info;
+    info.op = node->op;
+
+    if (node->shape) {
+        info.shape_type = ShapeType::Sphere;
+        Sphere* s = dynamic_cast<Sphere*>(node->shape);
+        flat.data.push_back(s->center.x);
+        flat.data.push_back(s->center.y);
+        flat.data.push_back(s->center.z);
+        flat.data.push_back(s->radius);
+        for (size_t pad = 4; pad < MAX_SHAPE_DATA_SIZE; ++pad) flat.data.push_back(0.0f);
+        flat.red.push_back(s->material.color.r);
+        flat.green.push_back(s->material.color.g);
+        flat.blue.push_back(s->material.color.b);
+        flat.specular_coeff.push_back(s->material.specular_coeff);
+        flat.shininess.push_back(s->material.shininess);
+        flat.left_indexes.push_back(size_t(-1));
+        flat.right_indexes.push_back(size_t(-1));
+    }
+    else {
+        info.shape_type = ShapeType::TreeNode;
+        for (size_t pad = 0; pad < MAX_SHAPE_DATA_SIZE; ++pad) flat.data.push_back(0.0f);
+        flat.red.push_back(0.0f);
+        flat.green.push_back(0.0f);
+        flat.blue.push_back(0.0f);
+        flat.specular_coeff.push_back(0.0f);
+        flat.shininess.push_back(0.0f);
+        flat.left_indexes.push_back(left_idx);
+        flat.right_indexes.push_back(right_idx);
+    }
+
+    flat.nodes.push_back(info);
+    return curr_idx;
+}
+
+HostFlatCSGTree Scene::flattenTree() const {
+    HostFlatCSGTree flat;
+    flattenHelper(root, flat);
+    return flat;
 }
