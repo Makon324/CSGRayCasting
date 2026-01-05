@@ -27,12 +27,12 @@ CSGNode* parseNode(std::istream& in) {
             std::cerr << "Error: Failed to parse sphere color.\n";
             return nullptr;
         }
-        float specular_coeff, shininess, reflectivity;
-        if (!(in >> specular_coeff >> shininess >> reflectivity)) {
+        float specular_coeff, shininess;
+        if (!(in >> specular_coeff >> shininess)) {
             std::cerr << "Error: Failed to parse sphere material properties.\n";
             return nullptr;
         }
-        Material mat{ col, specular_coeff, shininess, reflectivity };
+        Material mat{ col, specular_coeff, shininess};
         Sphere* s = new Sphere(center, radius, mat);
         return new CSGNode(CSGOp::UNION, s, nullptr, nullptr);
     }

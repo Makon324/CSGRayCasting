@@ -37,7 +37,6 @@ struct Material {
     Color color;           // Diffuse color
     float specular_coeff; // Specular coefficient (0-1)
     float shininess;      // Shininess exponent
-    float reflectivity;   // Reflectivity (0-1)
 };
 
 struct Hit {
