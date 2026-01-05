@@ -34,14 +34,14 @@ struct Ray {
 };
 
 struct Material {
-    Color color;           // Diffuse color
+	Color color;          // Diffuse color, combined with ambient
     float specular_coeff; // Specular coefficient (0-1)
     float shininess;      // Shininess exponent
 };
 
 struct Hit {
     Vec3 normal;          // Outward normal
-    Material mat;        // Material at hit
+    Material mat;         // Material at hit
 public:
 	Hit() = default;
 	Hit(Vec3 n, Material m) : normal(n), mat(m) {}
@@ -67,4 +67,4 @@ public:
     std::vector<Span> getSpans(const Ray& ray) const override;
 };
 
-Vec3 reflect(const Vec3& i, const Vec3& n);  // Declaration
+Vec3 reflect(const Vec3& i, const Vec3& n);
