@@ -1,15 +1,32 @@
-﻿  Compiling CUDA source file main.cu...
-  Compiling CUDA source file tracer.cu...
+﻿  Compiling CUDA source file tracer.cu...
   
-  C:\Users\maciek\CSGRayCast\CSGRayCast>"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\bin\nvcc.exe" -gencode=arch=compute_75,code=\"sm_75,compute_75\" --use-local-env -ccbin "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\bin\HostX64\x64" -x cu   -I"C:\Users\maciek\CSGRayCast\SDL2-2.32.10\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include"  -G   --keep-dir x64\Debug  -maxrregcount=0    --machine 64 --compile -cudart hybrid --allow-unsupported-compiler -g  -DWIN32 -DWIN64 -D_DEBUG -D_CONSOLE -D_MBCS -Xcompiler "/EHsc /W3 /nologo /Od /FS /Zi /RTC1 /MDd " -Xcompiler "/Fdx64\Debug\vc143.pdb" -o C:\Users\maciek\CSGRayCast\CSGRayCast\x64\Debug\tracer.cu.obj "C:\Users\maciek\CSGRayCast\CSGRayCast\tracer.cu" 
-  
-  C:\Users\maciek\CSGRayCast\CSGRayCast>"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\bin\nvcc.exe" -gencode=arch=compute_75,code=\"sm_75,compute_75\" --use-local-env -ccbin "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\bin\HostX64\x64" -x cu   -I"C:\Users\maciek\CSGRayCast\SDL2-2.32.10\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include"  -G   --keep-dir x64\Debug  -maxrregcount=0    --machine 64 --compile -cudart hybrid --allow-unsupported-compiler -g  -DWIN32 -DWIN64 -D_DEBUG -D_CONSOLE -D_MBCS -Xcompiler "/EHsc /W3 /nologo /Od /FS /Zi /RTC1 /MDd " -Xcompiler "/Fdx64\Debug\vc143.pdb" -o C:\Users\maciek\CSGRayCast\CSGRayCast\x64\Debug\main.cu.obj "C:\Users\maciek\CSGRayCast\CSGRayCast\main.cu" 
+  C:\Users\maciek\CSGRayCast\CSGRayCast>"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\bin\nvcc.exe" -gencode=arch=compute_75,code=\"sm_75,compute_75\" --use-local-env -ccbin "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\bin\HostX64\x64" -x cu -rdc=true  -I"C:\Users\maciek\CSGRayCast\SDL2-2.32.10\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include"  -G   --keep-dir x64\Debug  -maxrregcount=0    --machine 64 --compile -cudart hybrid --allow-unsupported-compiler -g  -DWIN32 -DWIN64 -D_DEBUG -D_CONSOLE -D_MBCS -Xcompiler "/EHsc /W3 /nologo /Od /FS /Zi /RTC1 /MDd " -Xcompiler "/Fdx64\Debug\vc143.pdb" -o C:\Users\maciek\CSGRayCast\CSGRayCast\x64\Debug\tracer.cu.obj "C:\Users\maciek\CSGRayCast\CSGRayCast\tracer.cu" 
   tracer.cu
-  tmpxft_00002f44_00000000-7_tracer.cudafe1.cpp
-  main.cu
-  tmpxft_00002a7c_00000000-7_main.cudafe1.cpp
+  tmpxft_00008fbc_00000000-7_tracer.cudafe1.cpp
+C:\Users\maciek\CSGRayCast\CSGRayCast\tracer.cu(182): warning C4018: '>': signed/unsigned mismatch
+C:\Users\maciek\CSGRayCast\CSGRayCast\tracer.cu(216): warning C4018: '>': signed/unsigned mismatch
   loadfile.cpp
 C:\Users\maciek\CSGRayCast\CSGRayCast\loadfile.cpp(138,34): warning C4101: 'e': unreferenced local variable
+  
+  C:\Users\maciek\CSGRayCast\CSGRayCast>"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\bin\nvcc.exe" -dlink  -o x64\Debug\CSGRayCast.device-link.obj -Xcompiler "/EHsc /W3 /nologo /Od /Zi /RTC1 /MDd " -Xcompiler "/Fdx64\Debug\vc143.pdb" -L"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\bin\x64/crt" -L"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\lib\x64" -L"C:\Users\maciek\CSGRayCast\SDL2-2.32.10\lib\x64" -L"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\lib\x64" cudart_static.lib kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib SDL2.lib SDL2main.lib cudart.lib cudadevrt.lib  -gencode=arch=compute_75,code=sm_75 -G  C:\Users\maciek\CSGRayCast\CSGRayCast\x64\Debug\tracer.cu.obj 
+  cudart_static.lib
+  kernel32.lib
+  user32.lib
+  gdi32.lib
+  winspool.lib
+  comdlg32.lib
+  advapi32.lib
+  shell32.lib
+  ole32.lib
+  oleaut32.lib
+  uuid.lib
+  odbc32.lib
+  odbccp32.lib
+  SDL2.lib
+  SDL2main.lib
+  cudart.lib
+  cudadevrt.lib
+  tracer.cu.obj
      Creating library C:\Users\maciek\CSGRayCast\x64\Debug\CSGRayCast.lib and object C:\Users\maciek\CSGRayCast\x64\Debug\CSGRayCast.exp
 LINK : warning LNK4098: defaultlib 'LIBCMT' conflicts with use of other libs; use /NODEFAULTLIB:library
   CSGRayCast.vcxproj -> C:\Users\maciek\CSGRayCast\x64\Debug\CSGRayCast.exe

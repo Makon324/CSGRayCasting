@@ -23,7 +23,9 @@
     <ClInclude Include="tracer.h" />
   </ItemGroup>
   <ItemGroup>
-    <CudaCompile Include="tracer.cu" />
+    <CudaCompile Include="tracer.cu">
+      <GenerateRelocatableDeviceCode Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</GenerateRelocatableDeviceCode>
+    </CudaCompile>
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{E534FCCF-0B18-E95E-FB9D-379E745DA5FB}</ProjectGuid>

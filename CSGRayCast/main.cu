@@ -23,7 +23,7 @@ void cpuRender(Color* h_image, const Camera& cam, const Light& light, const Flat
 void gpuRender(Color* h_image, Color* d_image, const Camera& cam, const Light& light, const FlatCSGTree& d_tree, int width, int height) {
     dim3 block(16, 16);
     dim3 grid((width + 15) / 16, (height + 15) / 16);
-    size_t shared_size = d_tree.num_nodes * (sizeof(FlatCSGNodeInfo) + MAX_SHAPE_DATA_SIZE * sizeof(float) + 6 * sizeof(float) + 2 * sizeof(size_t));
+    size_t shared_size = d_tree.num_nodes * (sizeof(FlatCSGNodeInfo) + MAX_SHAPE_DATA_SIZE * sizeof(float) + 6 * sizeof(float) + 3 * sizeof(size_t));
     renderKernel << <grid, block, shared_size >> > (d_image, cam, light, d_tree);
     cudaDeviceSynchronize();
     cudaMemcpy(h_image, d_image, width * height * sizeof(Color), cudaMemcpyDeviceToHost);
@@ -50,6 +50,11 @@ int main(int argc, char** argv) {
     }
     bool use_gpu = (std::strcmp(argv[1], "gpu") == 0);
     FlatCSGTree h_tree = loadFromFile(argv[2]);
+
+    // New: Compute dynamic sizes based on tree
+    h_tree.max_pool_size = h_tree.num_nodes * MAX_SPANS * 2;  // Conservative: Adjust factor if needed
+    h_tree.max_stack_depth = computeMaxDepth(h_tree);  // Tighter bound; or use h_tree.num_nodes for safety
+
     int width = 800;
     int height = 600;
     Vec3 lookat(0, 0, 0);
@@ -60,6 +65,10 @@ int main(int argc, char** argv) {
     Color* d_image = nullptr;
     FlatCSGTree d_tree;
     if (use_gpu) {
+        // New: Optional - Increase device stack size if VLAs are large
+        size_t stack_limit = 16384;  // 16KB; tune based on max_pool_size * sizeof(Span)
+        cudaDeviceSetLimit(cudaLimitStackSize, stack_limit);
+
         cudaMalloc(&d_image, width * height * sizeof(Color));
         copyTreeToDevice(h_tree, d_tree);
     }

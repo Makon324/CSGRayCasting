@@ -24,7 +24,7 @@ struct FlatCSGTree {
     float* green;
     float* blue;
 
-	float* diffuse_coeff;
+    float* diffuse_coeff;
     float* specular_coeff;
     float* shininess;
 
@@ -32,11 +32,15 @@ struct FlatCSGTree {
     size_t* right_indexes;
 
     size_t* post_order_indexes;
+
+    // Computed sizes for dynamic allocation
+    int max_pool_size;
+    int max_stack_depth;
 };
 
 FlatCSGTree loadFromFile(const char* filename);
 
-
+size_t computeMaxDepth(const FlatCSGTree& tree, size_t node_idx = 0);
 
 
 
