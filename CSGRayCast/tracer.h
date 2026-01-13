@@ -19,15 +19,48 @@ struct StackEntry {
     uint32_t count;
 };
 
-// Device helper functions
-__host__ __device__ void unionSpans(const Span* left, uint32_t left_count, const Span* right, uint32_t right_count, Span* result, uint32_t& result_count);
-__host__ __device__ void intersectionSpans(const Span* left, uint32_t left_count, const Span* right, uint32_t right_count, Span* result, uint32_t& result_count);
-__host__ __device__ void differenceSpans(const Span* left, uint32_t left_count, const Span* right, uint32_t right_count, Span* result, uint32_t& result_count);
+// --- STRIDED MEMORY WRAPPERS ---
+// Encapsulates the logic: Address = Base + (Index * Stride)
+struct StridedSpan {
+    Span* data;
+    size_t stride;
 
-__host__ __device__ void getSpans(const Ray& ray, Span* spans, uint32_t& count, const FlatCSGTree& tree, size_t node_idx, Span* thread_pool, StackEntry* thread_stack);
-__host__ __device__ Color trace(const Ray& ray, const Light& light, const FlatCSGTree& tree, Span* thread_pool, StackEntry* thread_stack);
+    __host__ __device__ StridedSpan(Span* d = nullptr, size_t s = 1) : data(d), stride(s) {}
 
-// UPDATED: Kernel now accepts offset and batch info for linear processing
+    __host__ __device__ Span& operator[](int i) const {
+        return data[i * stride];
+    }
+
+    // Get raw pointer to specific element (needed for Sphere::getSpans)
+    __host__ __device__ Span* at(int i) const {
+        return &data[i * stride];
+    }
+
+    __host__ __device__ bool is_valid() const { return data != nullptr; }
+};
+
+struct StridedStack {
+    StackEntry* data;
+    size_t stride;
+
+    __host__ __device__ StridedStack(StackEntry* d = nullptr, size_t s = 1) : data(d), stride(s) {}
+
+    __host__ __device__ StackEntry& operator[](int i) const {
+        return data[i * stride];
+    }
+
+    __host__ __device__ bool is_valid() const { return data != nullptr; }
+};
+
+
+// Device helper functions updated to use StridedSpan
+__host__ __device__ void unionSpans(const StridedSpan& left, uint32_t left_count, const StridedSpan& right, uint32_t right_count, StridedSpan& result, uint32_t& result_count);
+__host__ __device__ void intersectionSpans(const StridedSpan& left, uint32_t left_count, const StridedSpan& right, uint32_t right_count, StridedSpan& result, uint32_t& result_count);
+__host__ __device__ void differenceSpans(const StridedSpan& left, uint32_t left_count, const StridedSpan& right, uint32_t right_count, StridedSpan& result, uint32_t& result_count);
+
+__host__ __device__ void getSpans(const Ray& ray, Span* spans, uint32_t& count, const FlatCSGTree& tree, size_t node_idx, StridedSpan thread_pool, StridedStack thread_stack);
+__host__ __device__ Color trace(const Ray& ray, const Light& light, const FlatCSGTree& tree, StridedSpan thread_pool, StridedStack thread_stack);
+
 __global__ void renderKernel(Color* image, const Camera cam, const Light light, const FlatCSGTree tree,
     Span* global_pool, StackEntry* global_stack,
     size_t pixel_offset, size_t batch_size, size_t total_pixels);
@@ -37,11 +70,6 @@ void freeDeviceTree(FlatCSGTree& d_tree);
 void freeHostTree(FlatCSGTree& tree);
 
 void checkCudaError(cudaError_t err, const char* msg);
-
-
-
-
-
 
 
 
