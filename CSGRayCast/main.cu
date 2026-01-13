@@ -15,6 +15,8 @@ constexpr int HEIGHT = 600;
 constexpr float LIGHT_ROTATION_SPEED = 0.02f;
 constexpr size_t MAX_SCRATCH_MEMORY_BYTES = 512ULL * 1024ULL * 1024ULL;
 
+constexpr int threadsPerBlock = 256;
+
 void cpuRender(Color* h_image, const Camera& cam, const Light& light, const FlatCSGTree& tree) {
     for (int y = 0; y < HEIGHT; ++y) {
         for (int x = 0; x < WIDTH; ++x) {
@@ -32,10 +34,7 @@ void gpuRender(Color* h_image, Color* d_image, const Camera& cam, const Light& l
     // Shared memory size calculation
     size_t shared_size = d_tree.num_nodes * (sizeof(FlatCSGNodeInfo) + MAX_SHAPE_DATA_SIZE * sizeof(float) + 6 * sizeof(float) + 3 * sizeof(size_t));
 
-    size_t total_pixels = static_cast<size_t>(WIDTH) * HEIGHT;
-
-    // Linear thread block configuration
-    int threadsPerBlock = 256;
+    size_t total_pixels = static_cast<size_t>(WIDTH) * HEIGHT;    
 
     // BATCH LOOP
     // Instead of one giant launch, we iterate through pixels in chunks of 'batch_size'
