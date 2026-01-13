@@ -99,6 +99,19 @@ struct Camera {
 struct Light {
     Vec3 direction;
     __host__ __device__ Light(const Vec3& dir) : direction(dir.normalize()) {}
+
+    __host__ __device__ void rotateY(float angle) {
+        float s = sinf(angle);
+        float c = cosf(angle);
+        // Standard rotation matrix around Y axis
+        float new_x = direction.x * c + direction.z * s;
+        float new_z = -direction.x * s + direction.z * c;
+
+        direction.x = new_x;
+        direction.z = new_z;
+        // Re-normalize to ensure consistent lighting intensity
+        direction = direction.normalize();
+    }
 };
 
 

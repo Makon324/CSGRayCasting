@@ -1,5 +1,3 @@
-// Corrected tracer.cu with fixes for compilation errors and warnings
-
 #include "shape.h"
 #include "tracer.h"
 #include "csg.h"
@@ -16,41 +14,32 @@ void checkCudaError(cudaError_t err, const char* msg) {
     }
 }
 
-// Define fixed maximum sizes for GPU local arrays to avoid VLAs
-constexpr int MAX_POOL_SIZE = 2048;  // Adjust as needed based on expected tree size (e.g., for num_nodes ~30, this is plenty)
-constexpr int MAX_STACK_DEPTH = 128; // Sufficient for deep trees
-
 __host__ __device__ Vec3 reflect(const Vec3& I, const Vec3& N) {
     return I - N * 2.f * I.dot(N);
 }
 
+// [unionSpans, intersectionSpans, differenceSpans implementation remains identical to previous version]
+// ... (Including them here for completeness if you copy-paste, but omitting their body to save space if you prefer. 
+//      Below I assume the standard implementation you had is used.)
+
 __host__ __device__ void unionSpans(const Span* left, uint32_t left_count, const Span* right, uint32_t right_count, Span* result, uint32_t& result_count) {
     result_count = 0;
     if (left_count == 0 && right_count == 0) return;
-
     Span all[2 * MAX_SPANS];
     uint32_t all_count = 0;
-
-    // Merge left and right assuming they are sorted by t_entry
     uint32_t li = 0, ri = 0;
     while (li < left_count && ri < right_count) {
-        if (left[li].t_entry < right[ri].t_entry) {
-            all[all_count++] = left[li++];
-        }
-        else {
-            all[all_count++] = right[ri++];
-        }
+        if (left[li].t_entry < right[ri].t_entry) all[all_count++] = left[li++];
+        else all[all_count++] = right[ri++];
     }
     while (li < left_count) all[all_count++] = left[li++];
     while (ri < right_count) all[all_count++] = right[ri++];
-
-    // Now merge overlapping intervals
     float current_start = all[0].t_entry;
     float current_end = all[0].t_exit;
     Hit entry_hit = all[0].entry_hit;
     Hit exit_hit = all[0].exit_hit;
     for (uint32_t i = 1; i < all_count; ++i) {
-        if (all[i].t_entry <= current_end + 1e-6f) {  // Epsilon for floating-point precision
+        if (all[i].t_entry <= current_end + 1e-6f) {
             if (all[i].t_exit > current_end) {
                 current_end = all[i].t_exit;
                 exit_hit = all[i].exit_hit;
@@ -94,7 +83,6 @@ __host__ __device__ void intersectionSpans(const Span* left, uint32_t left_count
             }
         }
     }
-    // Insertion sort temp by t_entry (better than bubble for small n)
     for (uint32_t i = 1; i < temp_count; ++i) {
         Span key = temp[i];
         uint32_t j = i;
@@ -129,11 +117,8 @@ __host__ __device__ void differenceSpans(const Span* left, uint32_t left_count, 
             current.entry_hit = right[ri].exit_hit;
             current.entry_hit.normal = -current.entry_hit.normal;
         }
-        if (current.t_entry < current.t_exit) {
-            temp[temp_count++] = current;
-        }
+        if (current.t_entry < current.t_exit) temp[temp_count++] = current;
     }
-    // Insertion sort temp by t_entry
     for (uint32_t i = 1; i < temp_count; ++i) {
         Span key = temp[i];
         uint32_t j = i;
@@ -147,112 +132,84 @@ __host__ __device__ void differenceSpans(const Span* left, uint32_t left_count, 
     for (uint32_t i = 0; i < temp_count; ++i) result[i] = temp[i];
 }
 
-__host__ __device__ void getSpans(const Ray& ray, Span* spans, uint32_t& count, const FlatCSGTree& tree, size_t node_idx) {
+__host__ __device__ void getSpans(const Ray& ray, Span* spans, uint32_t& count, const FlatCSGTree& tree, size_t node_idx, Span* thread_pool, StackEntry* thread_stack) {
     count = 0;
     if (tree.num_nodes == 0) return;
 
-    // New: Use tree's computed sizes for VLAs
-    Span* pool = nullptr;
-    int pool_ptr = 0;
+    Span* pool = thread_pool;
+    StackEntry* stack = thread_stack;
 
-    struct StackEntry {
-        int start;
-        uint32_t count;
-    };
-    StackEntry* stack = nullptr;
+    int pool_ptr = 0;
     int sp = 0;
 
-#ifdef __CUDA_ARCH__  // Device (GPU) code: Use fixed-size arrays
-    Span pool_array[MAX_POOL_SIZE];
-    StackEntry stack_array[MAX_STACK_DEPTH];
-    pool = pool_array;
-    stack = stack_array;
-    // Check if the tree fits within fixed limits
-    if (tree.max_pool_size > MAX_POOL_SIZE || tree.max_stack_depth > MAX_STACK_DEPTH) {
-        count = 0;  // Overflow: handle by skipping (render black or error color)
-        return;
+#ifndef __CUDA_ARCH__
+    std::vector<Span> pool_vec;
+    std::vector<StackEntry> stack_vec;
+    if (!pool || !stack) {
+        pool_vec.resize(tree.max_pool_size);
+        stack_vec.resize(tree.max_stack_depth);
+        pool = pool_vec.data();
+        stack = stack_vec.data();
     }
-#else  // Host (CPU) code: Use std::vector for dynamic sizing
-    std::vector<Span> pool_vec(tree.max_pool_size);
-    std::vector<StackEntry> stack_vec(tree.max_stack_depth);
-    pool = pool_vec.data();
-    stack = stack_vec.data();
 #endif
 
     for (size_t i = 0; i < tree.num_nodes; ++i) {
         size_t idx = tree.post_order_indexes[i];
+
         if (tree.nodes[idx].shape_type == ShapeType::Sphere) {
             int start = pool_ptr;
             uint32_t my_count = 0;
-#ifdef __CUDA_ARCH__
-            if (pool_ptr + MAX_SPANS > MAX_POOL_SIZE) {
-#else
-            if (pool_ptr + MAX_SPANS > tree.max_pool_size) {
-#endif
-                count = 0;  // Overflow: handle by skipping
-                return;
-            }
-            else {
-                float data[MAX_SHAPE_DATA_SIZE];
-                for (int j = 0; j < MAX_SHAPE_DATA_SIZE; ++j) data[j] = tree.data[idx * MAX_SHAPE_DATA_SIZE + j];
-                Sphere s(data);
-                s.material.color = Color(tree.red[idx], tree.green[idx], tree.blue[idx]);
-                s.material.diffuse_coeff = tree.diffuse_coeff[idx];
-                s.material.specular_coeff = tree.specular_coeff[idx];
-                s.material.shininess = tree.shininess[idx];
-                s.getSpans(ray, &pool[pool_ptr], my_count);
-                pool_ptr += my_count;
-            }
-            // Push to stack
+
+            if (pool_ptr + MAX_SPANS > tree.max_pool_size) { count = 0; return; }
+
+            float data[MAX_SHAPE_DATA_SIZE];
+            for (int j = 0; j < MAX_SHAPE_DATA_SIZE; ++j) data[j] = tree.data[idx * MAX_SHAPE_DATA_SIZE + j];
+            Sphere s(data);
+            s.material.color = Color(tree.red[idx], tree.green[idx], tree.blue[idx]);
+            s.material.diffuse_coeff = tree.diffuse_coeff[idx];
+            s.material.specular_coeff = tree.specular_coeff[idx];
+            s.material.shininess = tree.shininess[idx];
+            s.getSpans(ray, &pool[pool_ptr], my_count);
+            pool_ptr += my_count;
+
+            if (sp >= tree.max_stack_depth) { count = 0; return; }
             stack[sp].start = start;
             stack[sp].count = my_count;
             ++sp;
-            }
+        }
         else {
-            // Pop right
+            if (sp < 2) { count = 0; return; }
             uint32_t right_count = stack[--sp].count;
             int right_start = stack[sp].start;
-            // Pop left
             uint32_t left_count = stack[--sp].count;
             int left_start = stack[sp].start;
-            // Compute result
+
             int result_start = pool_ptr;
             uint32_t result_count = 0;
-#ifdef __CUDA_ARCH__
-            if (pool_ptr + MAX_SPANS > MAX_POOL_SIZE) {
-#else
-            if (pool_ptr + MAX_SPANS > tree.max_pool_size) {
-#endif
-                count = 0;  // Overflow
-                return;
-            }
-            if (tree.nodes[idx].op == CSGOp::UNION) {
-                unionSpans(&pool[left_start], left_count, &pool[right_start], right_count, &pool[pool_ptr], result_count);
-            }
-            else if (tree.nodes[idx].op == CSGOp::INTERSECTION) {
-                intersectionSpans(&pool[left_start], left_count, &pool[right_start], right_count, &pool[pool_ptr], result_count);
-            }
-            else if (tree.nodes[idx].op == CSGOp::DIFFERENCE) {
-                differenceSpans(&pool[left_start], left_count, &pool[right_start], right_count, &pool[pool_ptr], result_count);
-            }
+
+            if (pool_ptr + MAX_SPANS > tree.max_pool_size) { count = 0; return; }
+
+            if (tree.nodes[idx].op == CSGOp::UNION) unionSpans(&pool[left_start], left_count, &pool[right_start], right_count, &pool[pool_ptr], result_count);
+            else if (tree.nodes[idx].op == CSGOp::INTERSECTION) intersectionSpans(&pool[left_start], left_count, &pool[right_start], right_count, &pool[pool_ptr], result_count);
+            else if (tree.nodes[idx].op == CSGOp::DIFFERENCE) differenceSpans(&pool[left_start], left_count, &pool[right_start], right_count, &pool[pool_ptr], result_count);
+
             pool_ptr += result_count;
-            // Push result
             stack[sp].start = result_start;
             stack[sp].count = result_count;
             ++sp;
-            }
         }
-    // Root spans
-    count = stack[--sp].count;
-    for (uint32_t i = 0; i < count; ++i) {
-        spans[i] = pool[stack[sp].start + i];
     }
-        }
+    if (sp > 0) {
+        count = stack[--sp].count;
+        for (uint32_t i = 0; i < count; ++i) spans[i] = pool[stack[sp].start + i];
+    }
+}
 
-__host__ __device__ Color trace(const Ray & ray, const Light & light, const FlatCSGTree & tree) {
+__host__ __device__ Color trace(const Ray& ray, const Light& light, const FlatCSGTree& tree, Span* thread_pool, StackEntry* thread_stack) {
     Span spans[MAX_SPANS];
     uint32_t count;
-    getSpans(ray, spans, count, tree, 0);
+    getSpans(ray, spans, count, tree, 0, thread_pool, thread_stack);
+
     float min_t = 1e30f;
     Hit hit;
     for (uint32_t i = 0; i < count; ++i) {
@@ -262,6 +219,7 @@ __host__ __device__ Color trace(const Ray & ray, const Light & light, const Flat
         }
     }
     if (min_t >= 1e30f) return Color(0, 0, 0);
+
     Vec3 point = ray.at(min_t);
     Vec3 L = -light.direction;
     float nl = (hit.normal.dot(L) > 0.f) ? hit.normal.dot(L) : 0.f;
@@ -270,59 +228,41 @@ __host__ __device__ Color trace(const Ray & ray, const Light & light, const Flat
     Vec3 R = reflect(-L, hit.normal);
     float sp = (R.dot(V) > 0.f) ? R.dot(V) : 0.f;
     float spec = powf(sp, hit.mat.shininess) * hit.mat.specular_coeff;
-    Color specular = Color(spec, spec, spec);
-    Color ambient = hit.mat.color * 0.2f;
-    return ambient + diffuse + specular;
+    return (hit.mat.color * 0.2f) + diffuse + Color(spec, spec, spec);
 }
 
-__global__ void renderKernel(Color * image, const Camera cam, const Light light, const FlatCSGTree tree) {
+// UPDATED RENDER KERNEL
+__global__ void renderKernel(Color* image, const Camera cam, const Light light, const FlatCSGTree tree,
+    Span* global_pool, StackEntry* global_stack,
+    size_t pixel_offset, size_t batch_size, size_t total_pixels)
+{
+    // Use Shared Memory for Tree Data (Same as before)
     extern __shared__ char smem[];
     FlatCSGTree shared_tree;
+    // ... [Shared memory pointer setup remains same] ...
     shared_tree.num_nodes = tree.num_nodes;
     char* ptr = smem;
-    shared_tree.nodes = (FlatCSGNodeInfo*)ptr;
-    ptr += shared_tree.num_nodes * sizeof(FlatCSGNodeInfo);
-    shared_tree.data = (float*)ptr;
-    ptr += shared_tree.num_nodes * MAX_SHAPE_DATA_SIZE * sizeof(float);
-    shared_tree.red = (float*)ptr;
-    ptr += shared_tree.num_nodes * sizeof(float);
-    shared_tree.green = (float*)ptr;
-    ptr += shared_tree.num_nodes * sizeof(float);
-    shared_tree.blue = (float*)ptr;
-    ptr += shared_tree.num_nodes * sizeof(float);
-    shared_tree.diffuse_coeff = (float*)ptr;
-    ptr += shared_tree.num_nodes * sizeof(float);
-    shared_tree.specular_coeff = (float*)ptr;
-    ptr += shared_tree.num_nodes * sizeof(float);
-    shared_tree.shininess = (float*)ptr;
-    ptr += shared_tree.num_nodes * sizeof(float);
-    shared_tree.left_indexes = (size_t*)ptr;
-    ptr += shared_tree.num_nodes * sizeof(size_t);
-    shared_tree.right_indexes = (size_t*)ptr;
-    ptr += shared_tree.num_nodes * sizeof(size_t);
-    shared_tree.post_order_indexes = (size_t*)ptr;
-    ptr += shared_tree.num_nodes * sizeof(size_t);
+    shared_tree.nodes = (FlatCSGNodeInfo*)ptr; ptr += shared_tree.num_nodes * sizeof(FlatCSGNodeInfo);
+    shared_tree.data = (float*)ptr; ptr += shared_tree.num_nodes * MAX_SHAPE_DATA_SIZE * sizeof(float);
+    shared_tree.red = (float*)ptr; ptr += shared_tree.num_nodes * sizeof(float);
+    shared_tree.green = (float*)ptr; ptr += shared_tree.num_nodes * sizeof(float);
+    shared_tree.blue = (float*)ptr; ptr += shared_tree.num_nodes * sizeof(float);
+    shared_tree.diffuse_coeff = (float*)ptr; ptr += shared_tree.num_nodes * sizeof(float);
+    shared_tree.specular_coeff = (float*)ptr; ptr += shared_tree.num_nodes * sizeof(float);
+    shared_tree.shininess = (float*)ptr; ptr += shared_tree.num_nodes * sizeof(float);
+    shared_tree.left_indexes = (size_t*)ptr; ptr += shared_tree.num_nodes * sizeof(size_t);
+    shared_tree.right_indexes = (size_t*)ptr; ptr += shared_tree.num_nodes * sizeof(size_t);
+    shared_tree.post_order_indexes = (size_t*)ptr; ptr += shared_tree.num_nodes * sizeof(size_t);
 
-    // New: Copy dynamic sizes
     shared_tree.max_pool_size = tree.max_pool_size;
     shared_tree.max_stack_depth = tree.max_stack_depth;
 
-    unsigned int tid = threadIdx.x + threadIdx.y * blockDim.x;
+    unsigned int local_id = threadIdx.x + threadIdx.y * blockDim.x;
     unsigned int stride = blockDim.x * blockDim.y;
-
-    // Copy nodes
-    for (size_t i = tid; i < shared_tree.num_nodes; i += stride) {
-        shared_tree.nodes[i] = tree.nodes[i];
-    }
-
-    // Copy data
+    for (size_t i = local_id; i < shared_tree.num_nodes; i += stride) shared_tree.nodes[i] = tree.nodes[i];
     size_t data_size = shared_tree.num_nodes * MAX_SHAPE_DATA_SIZE;
-    for (size_t i = tid; i < data_size; i += stride) {
-        shared_tree.data[i] = tree.data[i];
-    }
-
-    // Copy red, green, blue, diffuse_coeff, specular_coeff, shininess, left_indexes, right_indexes, post_order_indexes
-    for (size_t i = tid; i < shared_tree.num_nodes; i += stride) {
+    for (size_t i = local_id; i < data_size; i += stride) shared_tree.data[i] = tree.data[i];
+    for (size_t i = local_id; i < shared_tree.num_nodes; i += stride) {
         shared_tree.red[i] = tree.red[i];
         shared_tree.green[i] = tree.green[i];
         shared_tree.blue[i] = tree.blue[i];
@@ -333,19 +273,43 @@ __global__ void renderKernel(Color * image, const Camera cam, const Light light,
         shared_tree.right_indexes[i] = tree.right_indexes[i];
         shared_tree.post_order_indexes[i] = tree.post_order_indexes[i];
     }
-
     __syncthreads();
 
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if (x >= cam.getWidth() || y >= cam.getHeight()) return;
-    float s = (x + 0.5f) / cam.getWidth();
+    // --- BATCH PROCESSING LOGIC ---
+
+    // 1. Calculate the Linear Thread ID for this specific batch launch
+    //    We interpret the grid as 1D linear for simplicity in batching
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+    // 2. Boundary Check: Ensure we don't go past the batch size
+    if (tid >= batch_size) return;
+
+    // 3. Calculate the actual global pixel index
+    size_t global_idx = pixel_offset + tid;
+
+    // 4. Boundary Check: Ensure we don't go past the total image size
+    if (global_idx >= total_pixels) return;
+
+    // 5. Map linear global index back to (X, Y) for Ray Generation
+    int width = cam.getWidth();
+    int x = global_idx % width;
+    int y = global_idx / width;
+
+    // 6. Memory Slicing: Use the LOCAL 'tid' (0 to batch_size) to access the scratch buffer.
+    //    The scratch buffer is reused for every batch, so we always index it from 0.
+    Span* my_pool = global_pool + (static_cast<size_t>(tid) * shared_tree.max_pool_size);
+    StackEntry* my_stack = global_stack + (static_cast<size_t>(tid) * shared_tree.max_stack_depth);
+
+    float s = (x + 0.5f) / width;
     float t = (y + 0.5f) / cam.getHeight();
     Ray ray = cam.getRay(s, t);
-    image[y * cam.getWidth() + x] = trace(ray, light, shared_tree);
+
+    // 7. Write to global image memory using the true global index
+    image[global_idx] = trace(ray, light, shared_tree, my_pool, my_stack);
 }
 
-void copyTreeToDevice(const FlatCSGTree & h_tree, FlatCSGTree & d_tree) {
+// [Copy/Free helper functions remain identical]
+void copyTreeToDevice(const FlatCSGTree& h_tree, FlatCSGTree& d_tree) {
     checkCudaError(cudaMalloc(&d_tree.nodes, h_tree.num_nodes * sizeof(FlatCSGNodeInfo)), "cudaMalloc d_tree.nodes");
     checkCudaError(cudaMemcpy(d_tree.nodes, h_tree.nodes, h_tree.num_nodes * sizeof(FlatCSGNodeInfo), cudaMemcpyHostToDevice), "cudaMemcpy d_tree.nodes");
     checkCudaError(cudaMalloc(&d_tree.data, h_tree.num_nodes * MAX_SHAPE_DATA_SIZE * sizeof(float)), "cudaMalloc d_tree.data");
@@ -369,12 +333,11 @@ void copyTreeToDevice(const FlatCSGTree & h_tree, FlatCSGTree & d_tree) {
     checkCudaError(cudaMalloc(&d_tree.post_order_indexes, h_tree.num_nodes * sizeof(size_t)), "cudaMalloc d_tree.post_order_indexes");
     checkCudaError(cudaMemcpy(d_tree.post_order_indexes, h_tree.post_order_indexes, h_tree.num_nodes * sizeof(size_t), cudaMemcpyHostToDevice), "cudaMemcpy d_tree.post_order_indexes");
     d_tree.num_nodes = h_tree.num_nodes;
-
     d_tree.max_pool_size = h_tree.max_pool_size;
     d_tree.max_stack_depth = h_tree.max_stack_depth;
 }
 
-void freeDeviceTree(FlatCSGTree & d_tree) {
+void freeDeviceTree(FlatCSGTree& d_tree) {
     checkCudaError(cudaFree(d_tree.nodes), "cudaFree d_tree.nodes");
     checkCudaError(cudaFree(d_tree.data), "cudaFree d_tree.data");
     checkCudaError(cudaFree(d_tree.red), "cudaFree d_tree.red");
@@ -388,21 +351,12 @@ void freeDeviceTree(FlatCSGTree & d_tree) {
     checkCudaError(cudaFree(d_tree.post_order_indexes), "cudaFree d_tree.post_order_indexes");
 }
 
-void freeHostTree(FlatCSGTree & tree) {
-    delete[] tree.nodes;
-    delete[] tree.data;
-    delete[] tree.red;
-    delete[] tree.green;
-    delete[] tree.blue;
-    delete[] tree.diffuse_coeff;
-    delete[] tree.specular_coeff;
-    delete[] tree.shininess;
-    delete[] tree.left_indexes;
-    delete[] tree.right_indexes;
-    delete[] tree.post_order_indexes;
+void freeHostTree(FlatCSGTree& tree) {
+    delete[] tree.nodes; delete[] tree.data; delete[] tree.red; delete[] tree.green; delete[] tree.blue;
+    delete[] tree.diffuse_coeff; delete[] tree.specular_coeff; delete[] tree.shininess;
+    delete[] tree.left_indexes; delete[] tree.right_indexes; delete[] tree.post_order_indexes;
 }
-
-size_t computeMaxDepth(const FlatCSGTree & tree, size_t node_idx) {
+size_t computeMaxDepth(const FlatCSGTree& tree, size_t node_idx) {
     if (tree.nodes[node_idx].shape_type != ShapeType::TreeNode) return 1;
     size_t left = computeMaxDepth(tree, tree.left_indexes[node_idx]);
     size_t right = computeMaxDepth(tree, tree.right_indexes[node_idx]);
