@@ -1,11 +1,12 @@
 #pragma once
 
+#include <cstdint>
+
 #include "rayCast.h"
 #include "shape.h"
 #include "csg.h"
 
 constexpr uint32_t MAX_SPANS = 32;  // Reduced for memory efficiency
-constexpr int MAX_DEPTH = 32;       // Reduced for memory efficiency
 
 struct Span;
 struct Ray;
@@ -25,7 +26,6 @@ void copyTreeToDevice(const FlatCSGTree& h_tree, FlatCSGTree& d_tree);
 void freeDeviceTree(FlatCSGTree& d_tree);
 void freeHostTree(FlatCSGTree& tree);
 
-
-
+void checkCudaError(cudaError_t err, const char* msg);
 
 

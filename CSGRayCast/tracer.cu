@@ -7,6 +7,14 @@
 #include <cuda_runtime.h>
 #include <algorithm>
 #include <vector>
+#include <iostream>
+
+void checkCudaError(cudaError_t err, const char* msg) {
+    if (err != cudaSuccess) {
+        std::cerr << "CUDA Error: " << cudaGetErrorString(err) << " at " << msg << std::endl;
+        exit(1);
+    }
+}
 
 // Define fixed maximum sizes for GPU local arrays to avoid VLAs
 constexpr int MAX_POOL_SIZE = 2048;  // Adjust as needed based on expected tree size (e.g., for num_nodes ~30, this is plenty)
@@ -338,28 +346,28 @@ __global__ void renderKernel(Color * image, const Camera cam, const Light light,
 }
 
 void copyTreeToDevice(const FlatCSGTree & h_tree, FlatCSGTree & d_tree) {
-    cudaMalloc(&d_tree.nodes, h_tree.num_nodes * sizeof(FlatCSGNodeInfo));
-    cudaMemcpy(d_tree.nodes, h_tree.nodes, h_tree.num_nodes * sizeof(FlatCSGNodeInfo), cudaMemcpyHostToDevice);
-    cudaMalloc(&d_tree.data, h_tree.num_nodes * MAX_SHAPE_DATA_SIZE * sizeof(float));
-    cudaMemcpy(d_tree.data, h_tree.data, h_tree.num_nodes * MAX_SHAPE_DATA_SIZE * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMalloc(&d_tree.red, h_tree.num_nodes * sizeof(float));
-    cudaMemcpy(d_tree.red, h_tree.red, h_tree.num_nodes * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMalloc(&d_tree.green, h_tree.num_nodes * sizeof(float));
-    cudaMemcpy(d_tree.green, h_tree.green, h_tree.num_nodes * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMalloc(&d_tree.blue, h_tree.num_nodes * sizeof(float));
-    cudaMemcpy(d_tree.blue, h_tree.blue, h_tree.num_nodes * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMalloc(&d_tree.diffuse_coeff, h_tree.num_nodes * sizeof(float));
-    cudaMemcpy(d_tree.diffuse_coeff, h_tree.diffuse_coeff, h_tree.num_nodes * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMalloc(&d_tree.specular_coeff, h_tree.num_nodes * sizeof(float));
-    cudaMemcpy(d_tree.specular_coeff, h_tree.specular_coeff, h_tree.num_nodes * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMalloc(&d_tree.shininess, h_tree.num_nodes * sizeof(float));
-    cudaMemcpy(d_tree.shininess, h_tree.shininess, h_tree.num_nodes * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMalloc(&d_tree.left_indexes, h_tree.num_nodes * sizeof(size_t));
-    cudaMemcpy(d_tree.left_indexes, h_tree.left_indexes, h_tree.num_nodes * sizeof(size_t), cudaMemcpyHostToDevice);
-    cudaMalloc(&d_tree.right_indexes, h_tree.num_nodes * sizeof(size_t));
-    cudaMemcpy(d_tree.right_indexes, h_tree.right_indexes, h_tree.num_nodes * sizeof(size_t), cudaMemcpyHostToDevice);
-    cudaMalloc(&d_tree.post_order_indexes, h_tree.num_nodes * sizeof(size_t));
-    cudaMemcpy(d_tree.post_order_indexes, h_tree.post_order_indexes, h_tree.num_nodes * sizeof(size_t), cudaMemcpyHostToDevice);
+    checkCudaError(cudaMalloc(&d_tree.nodes, h_tree.num_nodes * sizeof(FlatCSGNodeInfo)), "cudaMalloc d_tree.nodes");
+    checkCudaError(cudaMemcpy(d_tree.nodes, h_tree.nodes, h_tree.num_nodes * sizeof(FlatCSGNodeInfo), cudaMemcpyHostToDevice), "cudaMemcpy d_tree.nodes");
+    checkCudaError(cudaMalloc(&d_tree.data, h_tree.num_nodes * MAX_SHAPE_DATA_SIZE * sizeof(float)), "cudaMalloc d_tree.data");
+    checkCudaError(cudaMemcpy(d_tree.data, h_tree.data, h_tree.num_nodes * MAX_SHAPE_DATA_SIZE * sizeof(float), cudaMemcpyHostToDevice), "cudaMemcpy d_tree.data");
+    checkCudaError(cudaMalloc(&d_tree.red, h_tree.num_nodes * sizeof(float)), "cudaMalloc d_tree.red");
+    checkCudaError(cudaMemcpy(d_tree.red, h_tree.red, h_tree.num_nodes * sizeof(float), cudaMemcpyHostToDevice), "cudaMemcpy d_tree.red");
+    checkCudaError(cudaMalloc(&d_tree.green, h_tree.num_nodes * sizeof(float)), "cudaMalloc d_tree.green");
+    checkCudaError(cudaMemcpy(d_tree.green, h_tree.green, h_tree.num_nodes * sizeof(float), cudaMemcpyHostToDevice), "cudaMemcpy d_tree.green");
+    checkCudaError(cudaMalloc(&d_tree.blue, h_tree.num_nodes * sizeof(float)), "cudaMalloc d_tree.blue");
+    checkCudaError(cudaMemcpy(d_tree.blue, h_tree.blue, h_tree.num_nodes * sizeof(float), cudaMemcpyHostToDevice), "cudaMemcpy d_tree.blue");
+    checkCudaError(cudaMalloc(&d_tree.diffuse_coeff, h_tree.num_nodes * sizeof(float)), "cudaMalloc d_tree.diffuse_coeff");
+    checkCudaError(cudaMemcpy(d_tree.diffuse_coeff, h_tree.diffuse_coeff, h_tree.num_nodes * sizeof(float), cudaMemcpyHostToDevice), "cudaMemcpy d_tree.diffuse_coeff");
+    checkCudaError(cudaMalloc(&d_tree.specular_coeff, h_tree.num_nodes * sizeof(float)), "cudaMalloc d_tree.specular_coeff");
+    checkCudaError(cudaMemcpy(d_tree.specular_coeff, h_tree.specular_coeff, h_tree.num_nodes * sizeof(float), cudaMemcpyHostToDevice), "cudaMemcpy d_tree.specular_coeff");
+    checkCudaError(cudaMalloc(&d_tree.shininess, h_tree.num_nodes * sizeof(float)), "cudaMalloc d_tree.shininess");
+    checkCudaError(cudaMemcpy(d_tree.shininess, h_tree.shininess, h_tree.num_nodes * sizeof(float), cudaMemcpyHostToDevice), "cudaMemcpy d_tree.shininess");
+    checkCudaError(cudaMalloc(&d_tree.left_indexes, h_tree.num_nodes * sizeof(size_t)), "cudaMalloc d_tree.left_indexes");
+    checkCudaError(cudaMemcpy(d_tree.left_indexes, h_tree.left_indexes, h_tree.num_nodes * sizeof(size_t), cudaMemcpyHostToDevice), "cudaMemcpy d_tree.left_indexes");
+    checkCudaError(cudaMalloc(&d_tree.right_indexes, h_tree.num_nodes * sizeof(size_t)), "cudaMalloc d_tree.right_indexes");
+    checkCudaError(cudaMemcpy(d_tree.right_indexes, h_tree.right_indexes, h_tree.num_nodes * sizeof(size_t), cudaMemcpyHostToDevice), "cudaMemcpy d_tree.right_indexes");
+    checkCudaError(cudaMalloc(&d_tree.post_order_indexes, h_tree.num_nodes * sizeof(size_t)), "cudaMalloc d_tree.post_order_indexes");
+    checkCudaError(cudaMemcpy(d_tree.post_order_indexes, h_tree.post_order_indexes, h_tree.num_nodes * sizeof(size_t), cudaMemcpyHostToDevice), "cudaMemcpy d_tree.post_order_indexes");
     d_tree.num_nodes = h_tree.num_nodes;
 
     d_tree.max_pool_size = h_tree.max_pool_size;
@@ -367,17 +375,17 @@ void copyTreeToDevice(const FlatCSGTree & h_tree, FlatCSGTree & d_tree) {
 }
 
 void freeDeviceTree(FlatCSGTree & d_tree) {
-    cudaFree(d_tree.nodes);
-    cudaFree(d_tree.data);
-    cudaFree(d_tree.red);
-    cudaFree(d_tree.green);
-    cudaFree(d_tree.blue);
-    cudaFree(d_tree.diffuse_coeff);
-    cudaFree(d_tree.specular_coeff);
-    cudaFree(d_tree.shininess);
-    cudaFree(d_tree.left_indexes);
-    cudaFree(d_tree.right_indexes);
-    cudaFree(d_tree.post_order_indexes);
+    checkCudaError(cudaFree(d_tree.nodes), "cudaFree d_tree.nodes");
+    checkCudaError(cudaFree(d_tree.data), "cudaFree d_tree.data");
+    checkCudaError(cudaFree(d_tree.red), "cudaFree d_tree.red");
+    checkCudaError(cudaFree(d_tree.green), "cudaFree d_tree.green");
+    checkCudaError(cudaFree(d_tree.blue), "cudaFree d_tree.blue");
+    checkCudaError(cudaFree(d_tree.diffuse_coeff), "cudaFree d_tree.diffuse_coeff");
+    checkCudaError(cudaFree(d_tree.specular_coeff), "cudaFree d_tree.specular_coeff");
+    checkCudaError(cudaFree(d_tree.shininess), "cudaFree d_tree.shininess");
+    checkCudaError(cudaFree(d_tree.left_indexes), "cudaFree d_tree.left_indexes");
+    checkCudaError(cudaFree(d_tree.right_indexes), "cudaFree d_tree.right_indexes");
+    checkCudaError(cudaFree(d_tree.post_order_indexes), "cudaFree d_tree.post_order_indexes");
 }
 
 void freeHostTree(FlatCSGTree & tree) {

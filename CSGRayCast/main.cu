@@ -3,10 +3,12 @@
 #include <cmath>
 #include <SDL.h>
 #include <chrono>
+#include <cuda_runtime.h>
 
 #include "csg.h"
 #include "rayCast.h"
 #include "tracer.h"
+
 
 
 void cpuRender(Color* h_image, const Camera& cam, const Light& light, const FlatCSGTree& tree, int width, int height) {
@@ -25,8 +27,9 @@ void gpuRender(Color* h_image, Color* d_image, const Camera& cam, const Light& l
     dim3 grid((width + 15) / 16, (height + 15) / 16);
     size_t shared_size = d_tree.num_nodes * (sizeof(FlatCSGNodeInfo) + MAX_SHAPE_DATA_SIZE * sizeof(float) + 6 * sizeof(float) + 3 * sizeof(size_t));
     renderKernel << <grid, block, shared_size >> > (d_image, cam, light, d_tree);
-    cudaDeviceSynchronize();
-    cudaMemcpy(h_image, d_image, width * height * sizeof(Color), cudaMemcpyDeviceToHost);
+    checkCudaError(cudaGetLastError(), "renderKernel launch");
+    checkCudaError(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    checkCudaError(cudaMemcpy(h_image, d_image, width * height * sizeof(Color), cudaMemcpyDeviceToHost), "cudaMemcpy to host");
 }
 
 void updateSurface(SDL_Surface* surface, Color* h_image, int width, int height) {
@@ -67,9 +70,9 @@ int main(int argc, char** argv) {
     if (use_gpu) {
         // New: Optional - Increase device stack size if VLAs are large
         size_t stack_limit = 16384;  // 16KB; tune based on max_pool_size * sizeof(Span)
-        cudaDeviceSetLimit(cudaLimitStackSize, stack_limit);
+        checkCudaError(cudaDeviceSetLimit(cudaLimitStackSize, stack_limit), "cudaDeviceSetLimit");
 
-        cudaMalloc(&d_image, width * height * sizeof(Color));
+        checkCudaError(cudaMalloc(&d_image, width * height * sizeof(Color)), "cudaMalloc d_image");
         copyTreeToDevice(h_tree, d_tree);
     }
     SDL_Init(SDL_INIT_VIDEO);
@@ -111,10 +114,9 @@ int main(int argc, char** argv) {
     SDL_Quit();
     delete[] h_image;
     if (use_gpu) {
-        cudaFree(d_image);
+        checkCudaError(cudaFree(d_image), "cudaFree d_image");
         freeDeviceTree(d_tree);
     }
     freeHostTree(h_tree);
     return 0;
 }
-
