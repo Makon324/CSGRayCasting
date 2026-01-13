@@ -9,28 +9,30 @@
 #include "rayCast.h"
 #include "tracer.h"
 
+// --- CONSTANTS ---
+constexpr int WIDTH = 800;
+constexpr int HEIGHT = 600;
 constexpr float LIGHT_ROTATION_SPEED = 0.02f;
-
 constexpr size_t MAX_SCRATCH_MEMORY_BYTES = 512ULL * 1024ULL * 1024ULL;
 
-void cpuRender(Color* h_image, const Camera& cam, const Light& light, const FlatCSGTree& tree, int width, int height) {
-    for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
-            float s = (x + 0.5f) / width;
-            float t = (y + 0.5f) / height;
+void cpuRender(Color* h_image, const Camera& cam, const Light& light, const FlatCSGTree& tree) {
+    for (int y = 0; y < HEIGHT; ++y) {
+        for (int x = 0; x < WIDTH; ++x) {
+            float s = (x + 0.5f) / WIDTH;
+            float t = (y + 0.5f) / HEIGHT;
             Ray ray = cam.getRay(s, t);
-            h_image[y * width + x] = trace(ray, light, tree, nullptr, nullptr);
+            h_image[y * WIDTH + x] = trace(ray, light, tree, nullptr, nullptr);
         }
     }
 }
 
 void gpuRender(Color* h_image, Color* d_image, const Camera& cam, const Light& light, const FlatCSGTree& d_tree,
-    int width, int height, Span* d_global_pool, StackEntry* d_global_stack, size_t batch_size) {
+    Span* d_global_pool, StackEntry* d_global_stack, size_t batch_size) {
 
     // Shared memory size calculation
     size_t shared_size = d_tree.num_nodes * (sizeof(FlatCSGNodeInfo) + MAX_SHAPE_DATA_SIZE * sizeof(float) + 6 * sizeof(float) + 3 * sizeof(size_t));
 
-    size_t total_pixels = static_cast<size_t>(width) * height;
+    size_t total_pixels = static_cast<size_t>(WIDTH) * HEIGHT;
 
     // Linear thread block configuration
     int threadsPerBlock = 256;
@@ -43,7 +45,7 @@ void gpuRender(Color* h_image, Color* d_image, const Camera& cam, const Light& l
         size_t current_batch_count = std::min(batch_size, total_pixels - offset);
 
         // Calculate grid size for this batch
-        int blocksPerGrid = (current_batch_count + threadsPerBlock - 1) / threadsPerBlock;
+        int blocksPerGrid = static_cast<int>((current_batch_count + threadsPerBlock - 1) / threadsPerBlock);
 
         // Launch kernel passing the offset
         renderKernel << <blocksPerGrid, threadsPerBlock, shared_size >> > (
@@ -56,14 +58,14 @@ void gpuRender(Color* h_image, Color* d_image, const Camera& cam, const Light& l
     }
 
     checkCudaError(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    checkCudaError(cudaMemcpy(h_image, d_image, width * height * sizeof(Color), cudaMemcpyDeviceToHost), "cudaMemcpy to host");
+    checkCudaError(cudaMemcpy(h_image, d_image, WIDTH * HEIGHT * sizeof(Color), cudaMemcpyDeviceToHost), "cudaMemcpy to host");
 }
 
-void updateSurface(SDL_Surface* surface, Color* h_image, int width, int height) {
+void updateSurface(SDL_Surface* surface, Color* h_image) {
     Uint8* pixels = static_cast<Uint8*>(surface->pixels);
-    for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
-            Color c = h_image[y * width + x];
+    for (int y = 0; y < HEIGHT; ++y) {
+        for (int x = 0; x < WIDTH; ++x) {
+            Color c = h_image[y * WIDTH + x];
             Uint8 r = static_cast<Uint8>(std::min(1.f, std::max(0.f, c.r)) * 255);
             Uint8 g = static_cast<Uint8>(std::min(1.f, std::max(0.f, c.g)) * 255);
             Uint8 b = static_cast<Uint8>(std::min(1.f, std::max(0.f, c.b)) * 255);
@@ -85,13 +87,11 @@ int main(int argc, char** argv) {
     h_tree.max_pool_size = h_tree.num_nodes * MAX_SPANS * 2;
     h_tree.max_stack_depth = computeMaxDepth(h_tree) * 2;
 
-    int width = 800;
-    int height = 600;
     Vec3 lookat(0, 0, 0);
     Vec3 up(0, 1, 0);
     float fov = 60.0f;
     Light light(Vec3(1, 1, 1));
-    Color* h_image = new Color[width * height];
+    Color* h_image = new Color[WIDTH * HEIGHT];
     Color* d_image = nullptr;
 
     // Global Memory Buffers for GPU
@@ -101,11 +101,11 @@ int main(int argc, char** argv) {
 
     FlatCSGTree d_tree;
     if (use_gpu) {
-        checkCudaError(cudaMalloc(&d_image, width * height * sizeof(Color)), "cudaMalloc d_image");
+        checkCudaError(cudaMalloc(&d_image, WIDTH * HEIGHT * sizeof(Color)), "cudaMalloc d_image");
         copyTreeToDevice(h_tree, d_tree);
 
         // --- SMART MEMORY ALLOCATION ---
-        size_t total_pixels = static_cast<size_t>(width) * height;
+        size_t total_pixels = static_cast<size_t>(WIDTH) * HEIGHT;
 
         // Calculate memory required per pixel
         size_t bytes_per_pixel = (static_cast<size_t>(h_tree.max_pool_size) * sizeof(Span)) +
@@ -122,6 +122,7 @@ int main(int argc, char** argv) {
         size_t stack_alloc_size = batch_size * h_tree.max_stack_depth * sizeof(StackEntry);
 
         std::cout << "Initialization:\n"
+            << "  Resolution: " << WIDTH << "x" << HEIGHT << "\n"
             << "  Per Pixel Reqs: " << bytes_per_pixel / 1024.0 << " KB\n"
             << "  Memory Limit: " << MAX_SCRATCH_MEMORY_BYTES / (1024.0 * 1024.0) << " MB\n"
             << "  Batch Size: " << batch_size << " pixels (out of " << total_pixels << ")\n"
@@ -133,11 +134,11 @@ int main(int argc, char** argv) {
     }
 
     SDL_Init(SDL_INIT_VIDEO);
-    SDL_Window* window = SDL_CreateWindow("CSG Ray Tracer", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, 0);
+    SDL_Window* window = SDL_CreateWindow("CSG Ray Tracer", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, WIDTH, HEIGHT, 0);
     SDL_Surface* surface = SDL_GetWindowSurface(window);
     float angle = 0.0f;
     Vec3 initial_origin(5.0f * sinf(angle), 0.0f, 5.0f * cosf(angle));
-    Camera cam(initial_origin, lookat, up, fov, width, height);
+    Camera cam(initial_origin, lookat, up, fov, WIDTH, HEIGHT);
 
     bool running = true;
     int frame = 0;
@@ -155,12 +156,12 @@ int main(int argc, char** argv) {
         light.rotateY(LIGHT_ROTATION_SPEED);
 
         if (use_gpu) {
-            gpuRender(h_image, d_image, cam, light, d_tree, width, height, d_global_pool, d_global_stack, batch_size);
+            gpuRender(h_image, d_image, cam, light, d_tree, d_global_pool, d_global_stack, batch_size);
         }
         else {
-            cpuRender(h_image, cam, light, h_tree, width, height);
+            cpuRender(h_image, cam, light, h_tree);
         }
-        updateSurface(surface, h_image, width, height);
+        updateSurface(surface, h_image);
         SDL_UpdateWindowSurface(window);
         auto end = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();

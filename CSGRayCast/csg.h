@@ -1,14 +1,14 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 
 
+enum class CSGOp : uint16_t { UNION, INTERSECTION, DIFFERENCE };
 
-enum class CSGOp { UNION, INTERSECTION, DIFFERENCE };
+enum class ShapeType : uint16_t { TreeNode, Sphere };
 
-enum class ShapeType { TreeNode, Sphere };
-
-struct FlatCSGNodeInfo {
+struct alignas(4) FlatCSGNodeInfo {
     CSGOp op;
     ShapeType shape_type;
 };
@@ -34,8 +34,8 @@ struct FlatCSGTree {
     size_t* post_order_indexes;
 
     // Computed sizes for dynamic allocation
-    int max_pool_size;
-    int max_stack_depth;
+    size_t max_pool_size;
+    size_t max_stack_depth;
 };
 
 FlatCSGTree loadFromFile(const char* filename);

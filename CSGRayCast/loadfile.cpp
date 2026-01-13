@@ -132,13 +132,7 @@ FlatCSGTree loadFromFile(const char* filename) {
     std::vector<float> reds, greens, blues, diffs, specs, shins;
     std::vector<size_t> lefts, rights;
 
-    try {
-        parseSubtree(in, nodes, shape_data, reds, greens, blues, diffs, specs, shins, lefts, rights);
-    }
-    catch (const std::exception& e) {
-        // Clean up any partial allocations if needed, but since we throw, user handles
-        throw;
-    }
+    parseSubtree(in, nodes, shape_data, reds, greens, blues, diffs, specs, shins, lefts, rights);
 
     size_t num_nodes = nodes.size();
     if (num_nodes == 0) {

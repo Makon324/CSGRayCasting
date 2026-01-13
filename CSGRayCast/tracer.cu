@@ -18,10 +18,6 @@ __host__ __device__ Vec3 reflect(const Vec3& I, const Vec3& N) {
     return I - N * 2.f * I.dot(N);
 }
 
-// [unionSpans, intersectionSpans, differenceSpans implementation remains identical to previous version]
-// ... (Including them here for completeness if you copy-paste, but omitting their body to save space if you prefer. 
-//      Below I assume the standard implementation you had is used.)
-
 __host__ __device__ void unionSpans(const Span* left, uint32_t left_count, const Span* right, uint32_t right_count, Span* result, uint32_t& result_count) {
     result_count = 0;
     if (left_count == 0 && right_count == 0) return;
@@ -231,18 +227,26 @@ __host__ __device__ Color trace(const Ray& ray, const Light& light, const FlatCS
     return (hit.mat.color * 0.2f) + diffuse + Color(spec, spec, spec);
 }
 
-// UPDATED RENDER KERNEL
 __global__ void renderKernel(Color* image, const Camera cam, const Light light, const FlatCSGTree tree,
     Span* global_pool, StackEntry* global_stack,
     size_t pixel_offset, size_t batch_size, size_t total_pixels)
 {
-    // Use Shared Memory for Tree Data (Same as before)
+    // Use Shared Memory for Tree Data
     extern __shared__ char smem[];
     FlatCSGTree shared_tree;
-    // ... [Shared memory pointer setup remains same] ...
     shared_tree.num_nodes = tree.num_nodes;
     char* ptr = smem;
+
+    // --- FIX: Reordered allocation to ensure 8-byte alignment for size_t pointers ---
+    // 1. Allocate size_t arrays (8-byte alignment) first
+    shared_tree.left_indexes = (size_t*)ptr; ptr += shared_tree.num_nodes * sizeof(size_t);
+    shared_tree.right_indexes = (size_t*)ptr; ptr += shared_tree.num_nodes * sizeof(size_t);
+    shared_tree.post_order_indexes = (size_t*)ptr; ptr += shared_tree.num_nodes * sizeof(size_t);
+
+    // 2. Allocate FlatCSGNodeInfo (4-byte alignment)
     shared_tree.nodes = (FlatCSGNodeInfo*)ptr; ptr += shared_tree.num_nodes * sizeof(FlatCSGNodeInfo);
+
+    // 3. Allocate float arrays (4-byte alignment)
     shared_tree.data = (float*)ptr; ptr += shared_tree.num_nodes * MAX_SHAPE_DATA_SIZE * sizeof(float);
     shared_tree.red = (float*)ptr; ptr += shared_tree.num_nodes * sizeof(float);
     shared_tree.green = (float*)ptr; ptr += shared_tree.num_nodes * sizeof(float);
@@ -250,53 +254,47 @@ __global__ void renderKernel(Color* image, const Camera cam, const Light light, 
     shared_tree.diffuse_coeff = (float*)ptr; ptr += shared_tree.num_nodes * sizeof(float);
     shared_tree.specular_coeff = (float*)ptr; ptr += shared_tree.num_nodes * sizeof(float);
     shared_tree.shininess = (float*)ptr; ptr += shared_tree.num_nodes * sizeof(float);
-    shared_tree.left_indexes = (size_t*)ptr; ptr += shared_tree.num_nodes * sizeof(size_t);
-    shared_tree.right_indexes = (size_t*)ptr; ptr += shared_tree.num_nodes * sizeof(size_t);
-    shared_tree.post_order_indexes = (size_t*)ptr; ptr += shared_tree.num_nodes * sizeof(size_t);
+
+    // --- End of pointers setup ---
 
     shared_tree.max_pool_size = tree.max_pool_size;
     shared_tree.max_stack_depth = tree.max_stack_depth;
 
     unsigned int local_id = threadIdx.x + threadIdx.y * blockDim.x;
     unsigned int stride = blockDim.x * blockDim.y;
-    for (size_t i = local_id; i < shared_tree.num_nodes; i += stride) shared_tree.nodes[i] = tree.nodes[i];
-    size_t data_size = shared_tree.num_nodes * MAX_SHAPE_DATA_SIZE;
-    for (size_t i = local_id; i < data_size; i += stride) shared_tree.data[i] = tree.data[i];
+
+    // Copy data from global to shared memory (Loop remains logic-compatible with new pointer locations)
     for (size_t i = local_id; i < shared_tree.num_nodes; i += stride) {
+        shared_tree.nodes[i] = tree.nodes[i];
+        shared_tree.left_indexes[i] = tree.left_indexes[i];
+        shared_tree.right_indexes[i] = tree.right_indexes[i];
+        shared_tree.post_order_indexes[i] = tree.post_order_indexes[i];
+
         shared_tree.red[i] = tree.red[i];
         shared_tree.green[i] = tree.green[i];
         shared_tree.blue[i] = tree.blue[i];
         shared_tree.diffuse_coeff[i] = tree.diffuse_coeff[i];
         shared_tree.specular_coeff[i] = tree.specular_coeff[i];
         shared_tree.shininess[i] = tree.shininess[i];
-        shared_tree.left_indexes[i] = tree.left_indexes[i];
-        shared_tree.right_indexes[i] = tree.right_indexes[i];
-        shared_tree.post_order_indexes[i] = tree.post_order_indexes[i];
+    }
+
+    size_t data_size = shared_tree.num_nodes * MAX_SHAPE_DATA_SIZE;
+    for (size_t i = local_id; i < data_size; i += stride) {
+        shared_tree.data[i] = tree.data[i];
     }
     __syncthreads();
 
     // --- BATCH PROCESSING LOGIC ---
-
-    // 1. Calculate the Linear Thread ID for this specific batch launch
-    //    We interpret the grid as 1D linear for simplicity in batching
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
-
-    // 2. Boundary Check: Ensure we don't go past the batch size
     if (tid >= batch_size) return;
 
-    // 3. Calculate the actual global pixel index
     size_t global_idx = pixel_offset + tid;
-
-    // 4. Boundary Check: Ensure we don't go past the total image size
     if (global_idx >= total_pixels) return;
 
-    // 5. Map linear global index back to (X, Y) for Ray Generation
     int width = cam.getWidth();
     int x = global_idx % width;
     int y = global_idx / width;
 
-    // 6. Memory Slicing: Use the LOCAL 'tid' (0 to batch_size) to access the scratch buffer.
-    //    The scratch buffer is reused for every batch, so we always index it from 0.
     Span* my_pool = global_pool + (static_cast<size_t>(tid) * shared_tree.max_pool_size);
     StackEntry* my_stack = global_stack + (static_cast<size_t>(tid) * shared_tree.max_stack_depth);
 
@@ -304,11 +302,9 @@ __global__ void renderKernel(Color* image, const Camera cam, const Light light, 
     float t = (y + 0.5f) / cam.getHeight();
     Ray ray = cam.getRay(s, t);
 
-    // 7. Write to global image memory using the true global index
     image[global_idx] = trace(ray, light, shared_tree, my_pool, my_stack);
 }
 
-// [Copy/Free helper functions remain identical]
 void copyTreeToDevice(const FlatCSGTree& h_tree, FlatCSGTree& d_tree) {
     checkCudaError(cudaMalloc(&d_tree.nodes, h_tree.num_nodes * sizeof(FlatCSGNodeInfo)), "cudaMalloc d_tree.nodes");
     checkCudaError(cudaMemcpy(d_tree.nodes, h_tree.nodes, h_tree.num_nodes * sizeof(FlatCSGNodeInfo), cudaMemcpyHostToDevice), "cudaMemcpy d_tree.nodes");
