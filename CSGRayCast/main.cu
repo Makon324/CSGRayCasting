@@ -80,7 +80,21 @@ int main(int argc, char** argv) {
         return 1;
     }
     bool use_gpu = (std::strcmp(argv[1], "gpu") == 0);
-    FlatCSGTree h_tree = loadFromFile(argv[2]);
+
+    FlatCSGTree h_tree;
+    try {
+        h_tree = loadFromFile(argv[2]);
+    }
+    catch (const std::exception& e) {
+        std::cerr << "[Error] Failed to load scene file: " << e.what() << std::endl;
+        return 1;
+    }
+
+    // CRITICAL: Check for empty tree to prevent Division By Zero later
+    if (h_tree.num_nodes == 0) {
+        std::cerr << "[Error] The scene file is empty or contains no valid nodes." << std::endl;
+        return 1;
+    }
 
     // Compute sizes based on tree
     h_tree.max_pool_size = h_tree.num_nodes * MAX_SPANS * 2;
