@@ -149,6 +149,8 @@ int main(int argc, char** argv) {
             if (event.type == SDL_KEYDOWN) {
                 if (event.key.keysym.sym == SDLK_LEFT) cam.rotateY(0.1f);
                 if (event.key.keysym.sym == SDLK_RIGHT) cam.rotateY(-0.1f);
+                if (event.key.keysym.sym == SDLK_UP) cam.rotateVertical(0.1f);
+                if (event.key.keysym.sym == SDLK_DOWN) cam.rotateVertical(-0.1f);
             }
         }
 
