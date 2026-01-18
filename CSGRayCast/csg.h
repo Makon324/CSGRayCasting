@@ -6,7 +6,7 @@
 
 enum class CSGOp : uint16_t { UNION, INTERSECTION, DIFFERENCE };
 
-enum class ShapeType : uint16_t { TreeNode, Sphere };
+enum class ShapeType : uint16_t { TreeNode, Sphere, Cuboid, Cylinder, Cone };
 
 struct alignas(4) FlatCSGNodeInfo {
     CSGOp op;

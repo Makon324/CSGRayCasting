@@ -14,6 +14,52 @@ void checkCudaError(cudaError_t err, const char* msg) {
     }
 }
 
+template <typename T>
+__host__ __device__ void processLeafNode(
+    const Ray& ray,
+    const FlatCSGTree& tree,
+    size_t idx,
+    StridedSpan& pool,
+    int& pool_ptr,
+    StridedStack& stack,
+    int& sp,
+    uint32_t& count
+) {
+    // Bounds Check
+    if (pool_ptr + MAX_SPANS > tree.max_pool_size) { count = 0; return; }
+
+    // Load Data from Flat Array
+    float data[MAX_SHAPE_DATA_SIZE];
+    // Unrolling this loop often helps performance
+#pragma unroll
+    for (int j = 0; j < MAX_SHAPE_DATA_SIZE; ++j) {
+        data[j] = tree.data[idx * MAX_SHAPE_DATA_SIZE + j];
+    }
+
+    // Construct the Shape (T)
+    T shape(data);
+
+    // Set Material Properties
+    shape.material.color = Color(tree.red[idx], tree.green[idx], tree.blue[idx]);
+    shape.material.diffuse_coeff = tree.diffuse_coeff[idx];
+    shape.material.specular_coeff = tree.specular_coeff[idx];
+    shape.material.shininess = tree.shininess[idx];
+
+    // Compute Intersections
+    int start = pool_ptr;
+    uint32_t my_count = 0;
+
+    // Pass the specific pointer within the strided pool
+    shape.getSpans(ray, pool.at(pool_ptr), my_count);
+    pool_ptr += my_count;
+
+    // Push to Stack
+    if (sp >= tree.max_stack_depth) { count = 0; return; }
+    stack[sp].start = start;
+    stack[sp].count = my_count;
+    ++sp;
+}
+
 __host__ __device__ Vec3 reflect(const Vec3& I, const Vec3& N) {
     return I - N * 2.f * I.dot(N);
 }
@@ -170,31 +216,26 @@ __host__ __device__ void getSpans(const Ray& ray, Span* spans, uint32_t& count, 
 
     for (size_t i = 0; i < tree.num_nodes; ++i) {
         size_t idx = tree.post_order_indexes[i];
+        ShapeType type = tree.nodes[idx].shape_type;
 
-        if (tree.nodes[idx].shape_type == ShapeType::Sphere) {
-            int start = pool_ptr;
-            uint32_t my_count = 0;
-
-            if (pool_ptr + MAX_SPANS > tree.max_pool_size) { count = 0; return; }
-
-            float data[MAX_SHAPE_DATA_SIZE];
-            for (int j = 0; j < MAX_SHAPE_DATA_SIZE; ++j) data[j] = tree.data[idx * MAX_SHAPE_DATA_SIZE + j];
-            Sphere s(data);
-            s.material.color = Color(tree.red[idx], tree.green[idx], tree.blue[idx]);
-            s.material.diffuse_coeff = tree.diffuse_coeff[idx];
-            s.material.specular_coeff = tree.specular_coeff[idx];
-            s.material.shininess = tree.shininess[idx];
-
-            // Pass the address of the specific span element in the strided pool
-            s.getSpans(ray, pool.at(pool_ptr), my_count);
-            pool_ptr += my_count;
-
-            if (sp >= tree.max_stack_depth) { count = 0; return; }
-            stack[sp].start = start;
-            stack[sp].count = my_count;
-            ++sp;
+        // Dispatch based on type, but use the templated helper
+        if (type == ShapeType::Sphere) {
+            processLeafNode<Sphere>(ray, tree, idx, pool, pool_ptr, stack, sp, count);
+        }
+        else if (type == ShapeType::Cuboid) {
+            processLeafNode<Cuboid>(ray, tree, idx, pool, pool_ptr, stack, sp, count);
+        }
+        else if (type == ShapeType::Cylinder) {
+            processLeafNode<Cylinder>(ray, tree, idx, pool, pool_ptr, stack, sp, count);
+        }
+        else if (type == ShapeType::Cone) {
+            processLeafNode<Cone>(ray, tree, idx, pool, pool_ptr, stack, sp, count);
         }
         else {
+            // TreeNode (Operators: UNION, INTERSECTION, DIFFERENCE)
+            // This logic remains exactly the same as before because 
+            // it processes Stack entries, not raw Shapes.
+
             if (sp < 2) { count = 0; return; }
             uint32_t right_count = stack[--sp].count;
             int right_start = stack[sp].start;
@@ -206,21 +247,25 @@ __host__ __device__ void getSpans(const Ray& ray, Span* spans, uint32_t& count, 
 
             if (pool_ptr + MAX_SPANS > tree.max_pool_size) { count = 0; return; }
 
-            // Create temporary wrappers for the sub-spans logic
-            // Base is pool + index, but stride remains the same
             StridedSpan left_span(pool.at(left_start), pool.stride);
             StridedSpan right_span(pool.at(right_start), pool.stride);
             StridedSpan result_span(pool.at(pool_ptr), pool.stride);
 
-            if (tree.nodes[idx].op == CSGOp::UNION) unionSpans(left_span, left_count, right_span, right_count, result_span, result_count);
-            else if (tree.nodes[idx].op == CSGOp::INTERSECTION) intersectionSpans(left_span, left_count, right_span, right_count, result_span, result_count);
-            else if (tree.nodes[idx].op == CSGOp::DIFFERENCE) differenceSpans(left_span, left_count, right_span, right_count, result_span, result_count);
+            if (tree.nodes[idx].op == CSGOp::UNION)
+                unionSpans(left_span, left_count, right_span, right_count, result_span, result_count);
+            else if (tree.nodes[idx].op == CSGOp::INTERSECTION)
+                intersectionSpans(left_span, left_count, right_span, right_count, result_span, result_count);
+            else if (tree.nodes[idx].op == CSGOp::DIFFERENCE)
+                differenceSpans(left_span, left_count, right_span, right_count, result_span, result_count);
 
             pool_ptr += result_count;
             stack[sp].start = result_start;
             stack[sp].count = result_count;
             ++sp;
         }
+
+        // Safety check if the helper set count to 0 (error case)
+        if (count == 0 && sp == 0 && pool_ptr == 0) return;
     }
     if (sp > 0) {
         count = stack[--sp].count;
@@ -330,7 +375,6 @@ __global__ void renderKernel(Color* image, const Camera cam, const Light light, 
     image[global_idx] = trace(ray, light, shared_tree, my_pool, my_stack);
 }
 
-// ... Copy/Free functions remain unchanged ...
 void copyTreeToDevice(const FlatCSGTree& h_tree, FlatCSGTree& d_tree) {
     checkCudaError(cudaMalloc(&d_tree.nodes, h_tree.num_nodes * sizeof(FlatCSGNodeInfo)), "cudaMalloc d_tree.nodes");
     checkCudaError(cudaMemcpy(d_tree.nodes, h_tree.nodes, h_tree.num_nodes * sizeof(FlatCSGNodeInfo), cudaMemcpyHostToDevice), "cudaMemcpy d_tree.nodes");

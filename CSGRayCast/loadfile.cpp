@@ -77,6 +77,48 @@ static size_t parseSubtree(std::istream& in,
         spec = sc;
         shin = sh;
     }
+    else if (type == "cuboid") {
+        nodes[this_index].shape_type = ShapeType::Cuboid;
+
+        // Expected: x y z w h d r g b dc sc sh
+        float x, y, z, w, h, d, cr, cg, cb, dc, sc, sh;
+        if (!(ss >> x >> y >> z >> w >> h >> d >> cr >> cg >> cb >> dc >> sc >> sh)) {
+            throw std::runtime_error("Parse error in cuboid data");
+        }
+        this_data[0] = x; this_data[1] = y; this_data[2] = z;
+        this_data[3] = w; this_data[4] = h; this_data[5] = d;
+
+        r = cr; g = cg; b = cb;
+        diff = dc; spec = sc; shin = sh;
+    }
+    else if (type == "cylinder") {
+        nodes[this_index].shape_type = ShapeType::Cylinder;
+
+        // Expected: x y z rad height r g b dc sc sh
+        float x, y, z, rad, height, cr, cg, cb, dc, sc, sh;
+        if (!(ss >> x >> y >> z >> rad >> height >> cr >> cg >> cb >> dc >> sc >> sh)) {
+            throw std::runtime_error("Parse error in cylinder data");
+        }
+        this_data[0] = x; this_data[1] = y; this_data[2] = z;
+        this_data[3] = rad; this_data[4] = height;
+
+        r = cr; g = cg; b = cb;
+        diff = dc; spec = sc; shin = sh;
+    }
+    else if (type == "cone") {
+        nodes[this_index].shape_type = ShapeType::Cone;
+
+        // Expected: x y z rad height r g b dc sc sh
+        float x, y, z, rad, height, cr, cg, cb, dc, sc, sh;
+        if (!(ss >> x >> y >> z >> rad >> height >> cr >> cg >> cb >> dc >> sc >> sh)) {
+            throw std::runtime_error("Parse error in cone data");
+        }
+        this_data[0] = x; this_data[1] = y; this_data[2] = z;
+        this_data[3] = rad; this_data[4] = height;
+
+        r = cr; g = cg; b = cb;
+        diff = dc; spec = sc; shin = sh;
+    }
     else {
         nodes[this_index].shape_type = ShapeType::TreeNode;
         if (type == "union") {
