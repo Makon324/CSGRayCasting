@@ -142,75 +142,111 @@ __host__ __device__ void unionSpans(
     result[result_count++] = current;
 }
 
-__host__ __device__ void intersectionSpans(const StridedSpan& left, uint32_t left_count, const StridedSpan& right, uint32_t right_count, StridedSpan& result, uint32_t& result_count) {
+__host__ __device__ void intersectionSpans(
+    const StridedSpan& left, uint32_t left_count,
+    const StridedSpan& right, uint32_t right_count,
+    StridedSpan& result, uint32_t& result_count)
+{
     result_count = 0;
-    Span temp[MAX_SPANS];
-    uint32_t temp_count = 0;
-    for (uint32_t i = 0; i < left_count; ++i) {
-        for (uint32_t j = 0; j < right_count; ++j) {
-            // Read from strided memory
-            float start = (left[i].t_entry > right[j].t_entry) ? left[i].t_entry : right[j].t_entry;
-            float end = (left[i].t_exit < right[j].t_exit) ? left[i].t_exit : right[j].t_exit;
-            if (start < end) {
-                Hit e_hit = (left[i].t_entry > right[j].t_entry) ? left[i].entry_hit : right[j].entry_hit;
-                Hit x_hit = (left[i].t_exit < right[j].t_exit) ? left[i].exit_hit : right[j].exit_hit;
-                temp[temp_count].t_entry = start;
-                temp[temp_count].entry_hit = e_hit;
-                temp[temp_count].t_exit = end;
-                temp[temp_count].exit_hit = x_hit;
-                ++temp_count;
-            }
+    uint32_t li = 0;
+    uint32_t ri = 0;
+
+    while (li < left_count && ri < right_count) {
+        // Load data into registers
+        Span l_span = left[li];
+        Span r_span = right[ri];
+
+        // Determine overlap interval
+        float start = (l_span.t_entry > r_span.t_entry) ? l_span.t_entry : r_span.t_entry;
+        float end = (l_span.t_exit < r_span.t_exit) ? l_span.t_exit : r_span.t_exit;
+
+        // If there is a valid overlap
+        if (start < end) {
+            // Logic: The Entry hit is determined by whoever started later (max).
+            //        The Exit hit is determined by whoever ended earlier (min).
+            Hit e_hit = (l_span.t_entry > r_span.t_entry) ? l_span.entry_hit : r_span.entry_hit;
+            Hit x_hit = (l_span.t_exit < r_span.t_exit) ? l_span.exit_hit : r_span.exit_hit;
+
+            // Direct write to global result
+            result[result_count].t_entry = start;
+            result[result_count].entry_hit = e_hit;
+            result[result_count].t_exit = end;
+            result[result_count].exit_hit = x_hit;
+            ++result_count;
+        }
+
+        // Advance the pointer of the span that ends first.
+        // It cannot possibly overlap with any future span from the other list.
+        if (l_span.t_exit < r_span.t_exit) {
+            li++;
+        }
+        else {
+            ri++;
         }
     }
-    for (uint32_t i = 1; i < temp_count; ++i) {
-        Span key = temp[i];
-        uint32_t j = i;
-        while (j > 0 && temp[j - 1].t_entry > key.t_entry) {
-            temp[j] = temp[j - 1];
-            --j;
-        }
-        temp[j] = key;
-    }
-    result_count = temp_count;
-    // Write back to strided result
-    for (uint32_t i = 0; i < temp_count; ++i) result[i] = temp[i];
 }
 
-__host__ __device__ void differenceSpans(const StridedSpan& left, uint32_t left_count, const StridedSpan& right, uint32_t right_count, StridedSpan& result, uint32_t& result_count) {
+__host__ __device__ void differenceSpans(
+    const StridedSpan& left, uint32_t left_count,
+    const StridedSpan& right, uint32_t right_count,
+    StridedSpan& result, uint32_t& result_count)
+{
     result_count = 0;
-    Span temp[2 * MAX_SPANS];
-    uint32_t temp_count = 0;
+    uint32_t ri_base = 0; // Tracks the first potential 'Right' span for the current 'Left'
+
     for (uint32_t li = 0; li < left_count; ++li) {
-        Span current = left[li]; // Read strided
-        for (uint32_t ri = 0; ri < right_count; ++ri) {
-            if (right[ri].t_exit <= current.t_entry || right[ri].t_entry >= current.t_exit) continue;
-            if (right[ri].t_entry > current.t_entry) {
-                Span new_span;
-                new_span.t_entry = current.t_entry;
-                new_span.entry_hit = current.entry_hit;
-                new_span.t_exit = right[ri].t_entry;
-                new_span.exit_hit = right[ri].entry_hit;
-                new_span.exit_hit.normal = -new_span.exit_hit.normal;
-                temp[temp_count++] = new_span;
+        Span curr = left[li]; // Load current Left span into register
+
+        // Iterate through Right spans that might overlap 'curr'
+        for (uint32_t ri = ri_base; ri < right_count; ++ri) {
+            Span sub = right[ri];
+
+            // optimization: If Right span is completely behind Current Left, 
+            // we never need to check it again for future Left spans.
+            if (sub.t_exit <= curr.t_entry) {
+                ri_base = ri + 1;
+                continue;
             }
-            current.t_entry = (current.t_entry > right[ri].t_exit) ? current.t_entry : right[ri].t_exit;
-            current.entry_hit = right[ri].exit_hit;
-            current.entry_hit.normal = -current.entry_hit.normal;
+
+            // optimization: If Right span is completely ahead, it doesn't affect Current Left.
+            // But we must NOT increment ri_base, as it might affect the NEXT Left span.
+            if (sub.t_entry >= curr.t_exit) {
+                break;
+            }
+
+            // --- Overlap Logic ---
+
+            // 1. If there is a gap between Current Start and Subtractor Start, keep that segment.
+            if (sub.t_entry > curr.t_entry) {
+                Span valid_segment;
+                valid_segment.t_entry = curr.t_entry;
+                valid_segment.entry_hit = curr.entry_hit;
+
+                valid_segment.t_exit = sub.t_entry;
+                valid_segment.exit_hit = sub.entry_hit;
+                valid_segment.exit_hit.normal = -valid_segment.exit_hit.normal; // Invert normal
+
+                result[result_count++] = valid_segment;
+            }
+
+            // 2. Cut the beginning of 'curr' by moving t_entry to the end of the subtractor
+            if (sub.t_exit > curr.t_entry) {
+                curr.t_entry = sub.t_exit;
+                curr.entry_hit = sub.exit_hit;
+                curr.entry_hit.normal = -curr.entry_hit.normal; // Invert normal
+            }
+
+            // 3. If 'curr' has been completely eaten, stop processing it
+            if (curr.t_entry >= curr.t_exit) {
+                break;
+            }
         }
-        if (current.t_entry < current.t_exit) temp[temp_count++] = current;
-    }
-    for (uint32_t i = 1; i < temp_count; ++i) {
-        Span key = temp[i];
-        uint32_t j = i;
-        while (j > 0 && temp[j - 1].t_entry > key.t_entry) {
-            temp[j] = temp[j - 1];
-            --j;
+
+        // If anything remains of the Left span after checking all Right spans, save it.
+        if (curr.t_entry < curr.t_exit) {
+            result[result_count++] = curr;
         }
-        temp[j] = key;
     }
-    result_count = temp_count;
-    // Write back to strided result
-    for (uint32_t i = 0; i < temp_count; ++i) result[i] = temp[i];
 }
 
 __host__ __device__ void getSpans(const Ray& ray, Span* spans, uint32_t& count, const FlatCSGTree& tree, size_t node_idx, StridedSpan thread_pool, StridedStack thread_stack) {
