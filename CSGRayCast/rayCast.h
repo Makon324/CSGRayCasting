@@ -1,14 +1,11 @@
 #pragma once
 
 #include <cuda_runtime.h>
-
-
 #include <cmath>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
-
 
 struct Vec3 {
     float x, y, z;
@@ -47,9 +44,10 @@ struct Material {
 
 struct Hit {
     Vec3 normal;          // Outward normal
-    Material mat;         // Material at hit
+    uint32_t node_id;      // Index into the FlatCSGTree material arrays
+
     __host__ __device__ Hit() {}
-    __host__ __device__ Hit(Vec3 n, Material m) : normal(n), mat(m) {}
+    __host__ __device__ Hit(Vec3 n, uint32_t id) : normal(n), node_id(id) {}
 };
 
 struct Camera {
@@ -130,7 +128,6 @@ struct Camera {
     __host__ __device__ int getHeight() const { return height; }
 };
 
-
 struct Light {
     Vec3 direction;
     __host__ __device__ Light(const Vec3& dir) : direction(dir.normalize()) {}
@@ -148,6 +145,3 @@ struct Light {
         direction = direction.normalize();
     }
 };
-
-
-

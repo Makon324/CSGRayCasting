@@ -39,11 +39,8 @@ __host__ __device__ void processLeafNode(
     // Construct the Shape (T)
     T shape(data);
 
-    // Set Material Properties
-    shape.material.color = Color(tree.red[idx], tree.green[idx], tree.blue[idx]);
-    shape.material.diffuse_coeff = tree.diffuse_coeff[idx];
-    shape.material.specular_coeff = tree.specular_coeff[idx];
-    shape.material.shininess = tree.shininess[idx];
+    // Set Material ID (optimized: don't copy full material struct)
+    shape.material_id = (int)idx;
 
     // Compute Intersections
     int start = pool_ptr;
@@ -233,9 +230,6 @@ __host__ __device__ void getSpans(const Ray& ray, Span* spans, uint32_t& count, 
         }
         else {
             // TreeNode (Operators: UNION, INTERSECTION, DIFFERENCE)
-            // This logic remains exactly the same as before because 
-            // it processes Stack entries, not raw Shapes.
-
             if (sp < 2) { count = 0; return; }
             uint32_t right_count = stack[--sp].count;
             int right_start = stack[sp].start;
@@ -289,15 +283,30 @@ __host__ __device__ Color trace(const Ray& ray, const Light& light, const FlatCS
     }
     if (min_t >= 1e30f) return Color(0, 0, 0);
 
+    // Look up material data at the very end
+    int mat_id = hit.node_id;
+
+    Color mat_color(0.5f, 0.5f, 0.5f);
+    float diff_coeff = 0.5f;
+    float spec_coeff = 0.5f;
+    float shininess = 10.0f;
+
+    if (mat_id >= 0) {
+        mat_color = Color(tree.red[mat_id], tree.green[mat_id], tree.blue[mat_id]);
+        diff_coeff = tree.diffuse_coeff[mat_id];
+        spec_coeff = tree.specular_coeff[mat_id];
+        shininess = tree.shininess[mat_id];
+    }
+
     Vec3 point = ray.at(min_t);
     Vec3 L = -light.direction;
     float nl = (hit.normal.dot(L) > 0.f) ? hit.normal.dot(L) : 0.f;
-    Color diffuse = hit.mat.color * hit.mat.diffuse_coeff * nl;
+    Color diffuse = mat_color * diff_coeff * nl;
     Vec3 V = -ray.dir;
     Vec3 R = reflect(-L, hit.normal);
     float sp = (R.dot(V) > 0.f) ? R.dot(V) : 0.f;
-    float spec = powf(sp, hit.mat.shininess) * hit.mat.specular_coeff;
-    return (hit.mat.color * 0.2f) + diffuse + Color(spec, spec, spec);
+    float spec = powf(sp, shininess) * spec_coeff;
+    return (mat_color * 0.2f) + diffuse + Color(spec, spec, spec);
 }
 
 __global__ void renderKernel(Color* image, const Camera cam, const Light light, const FlatCSGTree tree,
@@ -428,5 +437,3 @@ size_t computeMaxDepth(const FlatCSGTree& tree, size_t node_idx) {
     size_t right = computeMaxDepth(tree, tree.right_indexes[node_idx]);
     return 1 + ((left > right) ? left : right);
 }
-
-

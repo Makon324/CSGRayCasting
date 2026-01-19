@@ -2,10 +2,7 @@
 
 #include <cmath>
 #include <cuda_runtime.h>
-
-
 #include "rayCast.h"
-
 
 constexpr size_t MAX_SHAPE_DATA_SIZE = 8;  // Largest shape size in number of floats
 
@@ -17,9 +14,9 @@ struct Span {
 struct Sphere {
     Vec3 center;
     float radius;
-    Material material;
+    int material_id;
 
-    __host__ __device__ Sphere(const float* const data) : center(data[0], data[1], data[2]), radius(data[3]) {}
+    __host__ __device__ Sphere(const float* const data) : center(data[0], data[1], data[2]), radius(data[3]), material_id(-1) {}
 
     __host__ __device__ void getSpans(const Ray& ray, Span* spans, uint32_t& count) const {
         count = 0;
@@ -35,25 +32,24 @@ struct Sphere {
         spans[0].t_exit = t2;
         Vec3 p1 = ray.at(t1);
         spans[0].entry_hit.normal = (p1 - center).normalize();
-        spans[0].entry_hit.mat = material;
+        spans[0].entry_hit.node_id = material_id;
         Vec3 p2 = ray.at(t2);
         spans[0].exit_hit.normal = (p2 - center).normalize();
-        spans[0].exit_hit.mat = material;
+        spans[0].exit_hit.node_id = material_id;
         count = 1;
     }
 };
 
-// ... (After struct Sphere) ...
-
 struct Cuboid {
     Vec3 min_pt;
     Vec3 max_pt;
-    Material material;
+    int material_id;
 
     // Data: x, y, z (corner), w, h, d
     __host__ __device__ Cuboid(const float* const data)
         : min_pt(data[0], data[1], data[2]),
-        max_pt(data[0] + data[3], data[1] + data[4], data[2] + data[5]) {
+        max_pt(data[0] + data[3], data[1] + data[4], data[2] + data[5]),
+        material_id(-1) {
     }
 
     __host__ __device__ void getSpans(const Ray& ray, Span* spans, uint32_t& count) const {
@@ -120,11 +116,11 @@ struct Cuboid {
 
         spans[0].t_entry = t_min;
         spans[0].entry_hit.normal = n_entry;
-        spans[0].entry_hit.mat = material;
+        spans[0].entry_hit.node_id = material_id;
 
         spans[0].t_exit = t_max;
         spans[0].exit_hit.normal = n_exit;
-        spans[0].exit_hit.mat = material;
+        spans[0].exit_hit.node_id = material_id;
         count = 1;
     }
 };
@@ -133,11 +129,11 @@ struct Cylinder {
     Vec3 center;
     float radius;
     float height;
-    Material material;
+    int material_id;
 
     // Data: x, y, z (bottom center), radius, height
     __host__ __device__ Cylinder(const float* const data)
-        : center(data[0], data[1], data[2]), radius(data[3]), height(data[4]) {
+        : center(data[0], data[1], data[2]), radius(data[3]), height(data[4]), material_id(-1) {
     }
 
     __host__ __device__ void getSpans(const Ray& ray, Span* spans, uint32_t& count) const {
@@ -211,11 +207,11 @@ struct Cylinder {
 
         spans[0].t_entry = t_entries[0];
         spans[0].entry_hit.normal = n_entries[0];
-        spans[0].entry_hit.mat = material;
+        spans[0].entry_hit.node_id = material_id;
 
         spans[0].t_exit = t_entries[1];
         spans[0].exit_hit.normal = n_entries[1];
-        spans[0].exit_hit.mat = material;
+        spans[0].exit_hit.node_id = material_id;
         count = 1;
     }
 };
@@ -224,11 +220,11 @@ struct Cone {
     Vec3 center;
     float radius;
     float height;
-    Material material;
+    int material_id;
 
     // Data: x, y, z (bottom center), radius, height
     __host__ __device__ Cone(const float* const data)
-        : center(data[0], data[1], data[2]), radius(data[3]), height(data[4]) {
+        : center(data[0], data[1], data[2]), radius(data[3]), height(data[4]), material_id(-1) {
     }
 
     __host__ __device__ void getSpans(const Ray& ray, Span* spans, uint32_t& count) const {
@@ -296,14 +292,11 @@ struct Cone {
 
         spans[0].t_entry = t_entries[0];
         spans[0].entry_hit.normal = n_entries[0];
-        spans[0].entry_hit.mat = material;
+        spans[0].entry_hit.node_id = material_id;
 
         spans[0].t_exit = t_entries[1];
         spans[0].exit_hit.normal = n_entries[1];
-        spans[0].exit_hit.mat = material;
+        spans[0].exit_hit.node_id = material_id;
         count = 1;
     }
 };
-
-
-
