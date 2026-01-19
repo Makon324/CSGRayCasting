@@ -68,54 +68,78 @@ __host__ __device__ void copyToLocal(const StridedSpan& src, uint32_t count, Spa
     }
 }
 
-__host__ __device__ void unionSpans(const StridedSpan& left, uint32_t left_count, const StridedSpan& right, uint32_t right_count, StridedSpan& result, uint32_t& result_count) {
+__host__ __device__ void unionSpans(
+    const StridedSpan& left, uint32_t left_count,
+    const StridedSpan& right, uint32_t right_count,
+    StridedSpan& result, uint32_t& result_count)
+{
     result_count = 0;
     if (left_count == 0 && right_count == 0) return;
 
-    // Use local register/L1 memory for processing (fast, no stride issues)
-    Span all[2 * MAX_SPANS];
-    uint32_t all_count = 0;
-    uint32_t li = 0, ri = 0;
+    uint32_t li = 0;
+    uint32_t ri = 0;
 
-    // Read from strided memory
-    while (li < left_count && ri < right_count) {
-        if (left[li].t_entry < right[ri].t_entry) all[all_count++] = left[li++];
-        else all[all_count++] = right[ri++];
+    // Registers for the "current active union interval"
+    Span current;
+
+    // 1. Initialize 'current' with the earliest span from either left or right
+    bool take_left = false;
+    if (li < left_count && ri < right_count) {
+        if (left[li].t_entry < right[ri].t_entry) take_left = true;
     }
-    while (li < left_count) all[all_count++] = left[li++];
-    while (ri < right_count) all[all_count++] = right[ri++];
+    else if (li < left_count) {
+        take_left = true;
+    }
+    // else take_left = false (implies taking right)
 
-    // Process Union Logic locally
-    float current_start = all[0].t_entry;
-    float current_end = all[0].t_exit;
-    Hit entry_hit = all[0].entry_hit;
-    Hit exit_hit = all[0].exit_hit;
-    for (uint32_t i = 1; i < all_count; ++i) {
-        if (all[i].t_entry <= current_end + 1e-6f) {
-            if (all[i].t_exit > current_end) {
-                current_end = all[i].t_exit;
-                exit_hit = all[i].exit_hit;
+    if (take_left) {
+        current = left[li++];
+    }
+    else {
+        current = right[ri++];
+    }
+
+    // 2. Stream through the remaining spans
+    while (li < left_count || ri < right_count) {
+        Span next;
+
+        // Determine which span comes next in time
+        bool next_is_left = false;
+        if (li < left_count && ri < right_count) {
+            if (left[li].t_entry < right[ri].t_entry) next_is_left = true;
+        }
+        else if (li < left_count) {
+            next_is_left = true;
+        }
+
+        // Load the candidate
+        if (next_is_left) {
+            next = left[li++];
+        }
+        else {
+            next = right[ri++];
+        }
+
+        // 3. Merge Logic
+        // If the next span starts before (or exactly when) the current one ends: Overlap
+        if (next.t_entry <= current.t_exit + 1e-6f) {
+            // Extend the current interval if the new one goes further
+            if (next.t_exit > current.t_exit) {
+                current.t_exit = next.t_exit;
+                current.exit_hit = next.exit_hit;
             }
         }
         else {
-            // Write to strided output
-            result[result_count].t_entry = current_start;
-            result[result_count].entry_hit = entry_hit;
-            result[result_count].t_exit = current_end;
-            result[result_count].exit_hit = exit_hit;
-            ++result_count;
-            current_start = all[i].t_entry;
-            current_end = all[i].t_exit;
-            entry_hit = all[i].entry_hit;
-            exit_hit = all[i].exit_hit;
+            // Disjoint: Write the finished 'current' to result
+            result[result_count++] = current;
+
+            // Start a new interval
+            current = next;
         }
     }
-    // Final write
-    result[result_count].t_entry = current_start;
-    result[result_count].entry_hit = entry_hit;
-    result[result_count].t_exit = current_end;
-    result[result_count].exit_hit = exit_hit;
-    ++result_count;
+
+    // 4. Write the final pending interval
+    result[result_count++] = current;
 }
 
 __host__ __device__ void intersectionSpans(const StridedSpan& left, uint32_t left_count, const StridedSpan& right, uint32_t right_count, StridedSpan& result, uint32_t& result_count) {
