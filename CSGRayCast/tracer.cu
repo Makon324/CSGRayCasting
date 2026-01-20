@@ -26,10 +26,11 @@ __host__ __device__ void processLeafNode(
     uint32_t& count
 ) {
     // Bounds Check
-    if (pool_ptr + MAX_SPANS > tree.max_pool_size) { count = 0; return; }
+    if (pool_ptr + 1 > tree.max_pool_size) { count = 0; return; }
 
     // Load Data from Flat Array
     float data[MAX_SHAPE_DATA_SIZE];
+
     // Unrolling this loop often helps performance
 #pragma unroll
     for (int j = 0; j < MAX_SHAPE_DATA_SIZE; ++j) {
@@ -249,8 +250,9 @@ __host__ __device__ void differenceSpans(
     }
 }
 
-__host__ __device__ void getSpans(const Ray& ray, Span* spans, uint32_t& count, const FlatCSGTree& tree, size_t node_idx, StridedSpan thread_pool, StridedStack thread_stack) {
-    count = 0;
+__host__ __device__ void getSpans(const Ray& ray, size_t* out_start_idx, uint32_t* out_count, const FlatCSGTree& tree, size_t node_idx, StridedSpan thread_pool, StridedStack thread_stack) {
+    *out_count = 0;
+    *out_start_idx = 0;
     if (tree.num_nodes == 0) return;
 
     StridedSpan pool = thread_pool;
@@ -259,8 +261,8 @@ __host__ __device__ void getSpans(const Ray& ray, Span* spans, uint32_t& count, 
     int pool_ptr = 0;
     int sp = 0;
 
+    // Fallback for CPU
 #ifndef __CUDA_ARCH__
-    // Fallback for CPU execution (contiguous memory)
     std::vector<Span> pool_vec;
     std::vector<StackEntry> stack_vec;
     if (!pool.is_valid() || !stack.is_valid()) {
@@ -271,26 +273,19 @@ __host__ __device__ void getSpans(const Ray& ray, Span* spans, uint32_t& count, 
     }
 #endif
 
+    uint32_t current_op_count = 0; // Temp var for loop
+
     for (size_t i = 0; i < tree.num_nodes; ++i) {
         size_t idx = tree.post_order_indexes[i];
         ShapeType type = tree.nodes[idx].shape_type;
 
-        // Dispatch based on type, but use the templated helper
-        if (type == ShapeType::Sphere) {
-            processLeafNode<Sphere>(ray, tree, idx, pool, pool_ptr, stack, sp, count);
-        }
-        else if (type == ShapeType::Cuboid) {
-            processLeafNode<Cuboid>(ray, tree, idx, pool, pool_ptr, stack, sp, count);
-        }
-        else if (type == ShapeType::Cylinder) {
-            processLeafNode<Cylinder>(ray, tree, idx, pool, pool_ptr, stack, sp, count);
-        }
-        else if (type == ShapeType::Cone) {
-            processLeafNode<Cone>(ray, tree, idx, pool, pool_ptr, stack, sp, count);
-        }
+        if (type == ShapeType::Sphere) processLeafNode<Sphere>(ray, tree, idx, pool, pool_ptr, stack, sp, current_op_count);
+        else if (type == ShapeType::Cuboid) processLeafNode<Cuboid>(ray, tree, idx, pool, pool_ptr, stack, sp, current_op_count);
+        else if (type == ShapeType::Cylinder) processLeafNode<Cylinder>(ray, tree, idx, pool, pool_ptr, stack, sp, current_op_count);
+        else if (type == ShapeType::Cone) processLeafNode<Cone>(ray, tree, idx, pool, pool_ptr, stack, sp, current_op_count);
         else {
-            // TreeNode (Operators: UNION, INTERSECTION, DIFFERENCE)
-            if (sp < 2) { count = 0; return; }
+            // Operator
+            if (sp < 2) { *out_count = 0; return; }
             uint32_t right_count = stack[--sp].count;
             int right_start = stack[sp].start;
             uint32_t left_count = stack[--sp].count;
@@ -299,7 +294,8 @@ __host__ __device__ void getSpans(const Ray& ray, Span* spans, uint32_t& count, 
             int result_start = pool_ptr;
             uint32_t result_count = 0;
 
-            if (pool_ptr + MAX_SPANS > tree.max_pool_size) { count = 0; return; }
+            // Heuristic check: operations sum counts
+            if (pool_ptr + left_count + right_count > tree.max_pool_size) { *out_count = 0; return; }
 
             StridedSpan left_span(pool.at(left_start), pool.stride);
             StridedSpan right_span(pool.at(right_start), pool.stride);
@@ -317,28 +313,27 @@ __host__ __device__ void getSpans(const Ray& ray, Span* spans, uint32_t& count, 
             stack[sp].count = result_count;
             ++sp;
         }
-
-        // Safety check if the helper set count to 0 (error case)
-        if (count == 0 && sp == 0 && pool_ptr == 0) return;
     }
+
     if (sp > 0) {
-        count = stack[--sp].count;
-        // Copy from strided pool to the final linear result buffer
-        for (uint32_t i = 0; i < count; ++i) spans[i] = pool[stack[sp].start + i];
+        // Return index to results in pool directly
+        *out_count = stack[--sp].count;
+        *out_start_idx = stack[sp].start;
     }
 }
 
 __host__ __device__ Color trace(const Ray& ray, const Light& light, const FlatCSGTree& tree, StridedSpan thread_pool, StridedStack thread_stack) {
-    Span spans[MAX_SPANS];
     uint32_t count;
-    getSpans(ray, spans, count, tree, 0, thread_pool, thread_stack);
+    size_t start_idx;
+    getSpans(ray, &start_idx, &count, tree, 0, thread_pool, thread_stack);
 
     float min_t = 1e30f;
     Hit hit;
     for (uint32_t i = 0; i < count; ++i) {
-        if (spans[i].t_entry > 0.001f && spans[i].t_entry < min_t) {
-            min_t = spans[i].t_entry;
-            hit = spans[i].entry_hit;
+        Span s = thread_pool[(int)(start_idx + i)];
+        if (s.t_entry > 0.001f && s.t_entry < min_t) {
+            min_t = s.t_entry;
+            hit = s.entry_hit;
         }
     }
     if (min_t >= 1e30f) return Color(0, 0, 0);
@@ -497,3 +492,29 @@ size_t computeMaxDepth(const FlatCSGTree& tree, size_t node_idx) {
     size_t right = computeMaxDepth(tree, tree.right_indexes[node_idx]);
     return 1 + ((left > right) ? left : right);
 }
+
+size_t computeTotalSpanUsage(const FlatCSGTree& tree) {
+    std::vector<size_t> usage(tree.num_nodes, 0);
+    size_t total_pool = 0;
+
+    // Iterate in post-order (bottom up)
+    for (size_t i = 0; i < tree.num_nodes; ++i) {
+        size_t idx = tree.post_order_indexes[i];
+        if (tree.nodes[idx].shape_type != ShapeType::TreeNode) {
+            // Leaf node: standard convex primitives usually return 1 span.
+            // (We assume 1 for simple convex, could be more for complex tori etc)
+            usage[idx] = 1;
+        }
+        else {
+            // Operator: allocates space for its result based on children
+            size_t left_idx = tree.left_indexes[idx];
+            size_t right_idx = tree.right_indexes[idx];
+            // Worst case: Union/Difference/Intersect can result in (left + right) spans
+            usage[idx] = usage[left_idx] + usage[right_idx];
+        }
+        total_pool += usage[idx];
+    }
+    return total_pool;
+}
+
+

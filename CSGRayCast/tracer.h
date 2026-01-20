@@ -5,14 +5,6 @@
 #include "shape.h"
 #include "csg.h"
 
-constexpr uint32_t MAX_SPANS = 32;
-
-// Forward declarations
-struct Span;
-struct Ray;
-struct Light;
-struct Color;
-struct FlatCSGTree;
 
 struct StackEntry {
     int start;
@@ -53,12 +45,12 @@ struct StridedStack {
 };
 
 
-// Device helper functions updated to use StridedSpan
 __host__ __device__ void unionSpans(const StridedSpan& left, uint32_t left_count, const StridedSpan& right, uint32_t right_count, StridedSpan& result, uint32_t& result_count);
 __host__ __device__ void intersectionSpans(const StridedSpan& left, uint32_t left_count, const StridedSpan& right, uint32_t right_count, StridedSpan& result, uint32_t& result_count);
 __host__ __device__ void differenceSpans(const StridedSpan& left, uint32_t left_count, const StridedSpan& right, uint32_t right_count, StridedSpan& result, uint32_t& result_count);
 
-__host__ __device__ void getSpans(const Ray& ray, Span* spans, uint32_t& count, const FlatCSGTree& tree, size_t node_idx, StridedSpan thread_pool, StridedStack thread_stack);
+// CHANGED: getSpans now returns the start index via pointer, no local buffer copy needed
+__host__ __device__ void getSpans(const Ray& ray, size_t* out_start_idx, uint32_t* out_count, const FlatCSGTree& tree, size_t node_idx, StridedSpan thread_pool, StridedStack thread_stack);
 __host__ __device__ Color trace(const Ray& ray, const Light& light, const FlatCSGTree& tree, StridedSpan thread_pool, StridedStack thread_stack);
 
 __global__ void renderKernel(Color* image, const Camera cam, const Light light, const FlatCSGTree tree,

@@ -42,7 +42,7 @@ FlatCSGTree loadFromFile(const char* filename);
 
 size_t computeMaxDepth(const FlatCSGTree& tree, size_t node_idx = 0);
 
-
+size_t computeTotalSpanUsage(const FlatCSGTree& tree);
 
 
 

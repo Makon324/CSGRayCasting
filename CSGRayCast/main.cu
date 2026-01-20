@@ -97,7 +97,7 @@ int main(int argc, char** argv) {
     }
 
     // Compute sizes based on tree
-    h_tree.max_pool_size = h_tree.num_nodes * MAX_SPANS * 2;
+    h_tree.max_pool_size = computeTotalSpanUsage(h_tree);
     h_tree.max_stack_depth = computeMaxDepth(h_tree) * 2;
 
     Vec3 lookat(0, 0, 0);
