@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdint.h>
 #include <cuda_runtime.h>
 #include <cmath>
 
@@ -38,7 +39,7 @@ struct Material {
     float diffuse_coeff;
     float specular_coeff; // Specular coefficient (0-1)
     float shininess;      // Shininess exponent
-    __host__ __device__ Material() {}
+    __host__ __device__ Material() : color(0), diffuse_coeff(0), specular_coeff(0), shininess(0) {}
     __host__ __device__ Material(Color c, float dc, float sc, float sh) : color(c), diffuse_coeff(dc), specular_coeff(sc), shininess(sh) {}
 };
 
@@ -46,7 +47,7 @@ struct Hit {
     Vec3 normal;          // Outward normal
     uint32_t node_id;      // Index into the FlatCSGTree material arrays
 
-    __host__ __device__ Hit() {}
+    __host__ __device__ Hit() : normal(0), node_id(0) {}
     __host__ __device__ Hit(Vec3 n, uint32_t id) : normal(n), node_id(id) {}
 };
 

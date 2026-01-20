@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdint.h>
 #include <cmath>
 #include <cuda_runtime.h>
 #include "rayCast.h"
