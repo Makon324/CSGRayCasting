@@ -1,5 +1,6 @@
 #include <iostream>
 #include <cstring>
+#include <vector>
 #include <cmath>
 #include <SDL.h>
 #include <chrono>
@@ -18,14 +19,71 @@ constexpr size_t MAX_SCRATCH_MEMORY_BYTES = 512ULL * 1024ULL * 1024ULL;
 constexpr int threadsPerBlock = 256;
 
 void cpuRender(Color* h_image, const Camera& cam, const Light& light, const FlatCSGTree& tree) {
+    // --- FIX: Allocate scratch memory ONCE ---
+    // We allocate enough memory for the worst-case CSG operation defined by the tree.
+    // This memory persists for the entire frame render.
+    std::vector<Span> pool_buffer(tree.max_pool_size);
+    std::vector<StackEntry> stack_buffer(tree.max_stack_depth);
+
+    // Create the wrappers that the tracer expects
+    StridedSpan pool(pool_buffer.data(), 1);
+    StridedStack stack(stack_buffer.data(), 1);
+
     for (int y = 0; y < HEIGHT; ++y) {
         for (int x = 0; x < WIDTH; ++x) {
             float s = (x + 0.5f) / WIDTH;
             float t = (y + 0.5f) / HEIGHT;
             Ray ray = cam.getRay(s, t);
-            h_image[y * WIDTH + x] = trace(ray, light, tree, nullptr, nullptr);
+
+            // Pass the pre-allocated buffers instead of nullptr
+            h_image[y * WIDTH + x] = trace(ray, light, tree, pool, stack);
         }
     }
+}
+
+void gpuRender(Color* h_image, Color* d_image, const Camera& cam, const Light& light, const FlatCSGTree& d_tree,
+    Span* d_global_pool, StackEntry* d_global_stack, size_t batch_size) {
+
+    // Shared memory size calculation
+    size_t shared_size =
+        // Topology (per Node)
+        d_tree.num_nodes * (
+            sizeof(FlatCSGNodeInfo) +
+            3 * sizeof(size_t)        // left, right, post_order
+            ) +
+        // Data (per Primitive)
+        d_tree.num_primitives * (
+            MAX_SHAPE_DATA_SIZE * sizeof(float) + // Shape data
+            6 * sizeof(float)                     // Material props (rgb + 3 coeffs)
+            );
+
+    // Align shared_size to be safe (optional but recommended)
+    if (shared_size % 8 != 0) shared_size += (8 - (shared_size % 8));
+
+    size_t total_pixels = static_cast<size_t>(WIDTH) * HEIGHT;
+
+    // BATCH LOOP
+    // Instead of one giant launch, we iterate through pixels in chunks of 'batch_size'
+    for (size_t offset = 0; offset < total_pixels; offset += batch_size) {
+
+        // Calculate the actual size of the current batch (last batch might be smaller)
+        size_t current_batch_count = std::min(batch_size, total_pixels - offset);
+
+        // Calculate grid size for this batch
+        int blocksPerGrid = static_cast<int>((current_batch_count + threadsPerBlock - 1) / threadsPerBlock);
+
+        // Launch kernel passing the offset
+        renderKernel << <blocksPerGrid, threadsPerBlock, shared_size >> > (
+            d_image, cam, light, d_tree,
+            d_global_pool, d_global_stack,
+            offset, current_batch_count, total_pixels
+            );
+
+        checkCudaError(cudaGetLastError(), "renderKernel launch");
+    }
+
+    checkCudaError(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    checkCudaError(cudaMemcpy(h_image, d_image, WIDTH * HEIGHT * sizeof(Color), cudaMemcpyDeviceToHost), "cudaMemcpy to host");
 }
 
 void compactTreeMemory(FlatCSGTree& tree) {
@@ -81,51 +139,6 @@ void compactTreeMemory(FlatCSGTree& tree) {
     delete[] tree.diffuse_coeff; tree.diffuse_coeff = new_diff;
     delete[] tree.specular_coeff; tree.specular_coeff = new_spec;
     delete[] tree.shininess; tree.shininess = new_shin;
-}
-
-void gpuRender(Color* h_image, Color* d_image, const Camera& cam, const Light& light, const FlatCSGTree& d_tree,
-    Span* d_global_pool, StackEntry* d_global_stack, size_t batch_size) {
-
-    // Shared memory size calculation
-    size_t shared_size =
-        // Topology (per Node)
-        d_tree.num_nodes * (
-            sizeof(FlatCSGNodeInfo) +
-            3 * sizeof(size_t)        // left, right, post_order
-            ) +
-        // Data (per Primitive)
-        d_tree.num_primitives * (
-            MAX_SHAPE_DATA_SIZE * sizeof(float) + // Shape data
-            6 * sizeof(float)                     // Material props (rgb + 3 coeffs)
-            );
-
-    // Align shared_size to be safe (optional but recommended)
-    if (shared_size % 8 != 0) shared_size += (8 - (shared_size % 8));
-
-    size_t total_pixels = static_cast<size_t>(WIDTH) * HEIGHT;    
-
-    // BATCH LOOP
-    // Instead of one giant launch, we iterate through pixels in chunks of 'batch_size'
-    for (size_t offset = 0; offset < total_pixels; offset += batch_size) {
-
-        // Calculate the actual size of the current batch (last batch might be smaller)
-        size_t current_batch_count = std::min(batch_size, total_pixels - offset);
-
-        // Calculate grid size for this batch
-        int blocksPerGrid = static_cast<int>((current_batch_count + threadsPerBlock - 1) / threadsPerBlock);
-
-        // Launch kernel passing the offset
-        renderKernel << <blocksPerGrid, threadsPerBlock, shared_size >> > (
-            d_image, cam, light, d_tree,
-            d_global_pool, d_global_stack,
-            offset, current_batch_count, total_pixels
-            );
-
-        checkCudaError(cudaGetLastError(), "renderKernel launch");
-    }
-
-    checkCudaError(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-    checkCudaError(cudaMemcpy(h_image, d_image, WIDTH * HEIGHT * sizeof(Color), cudaMemcpyDeviceToHost), "cudaMemcpy to host");
 }
 
 void updateSurface(SDL_Surface* surface, Color* h_image) {
