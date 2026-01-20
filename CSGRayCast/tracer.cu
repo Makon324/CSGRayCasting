@@ -261,7 +261,7 @@ __host__ __device__ void getSpans(const Ray& ray, size_t* out_start_idx, uint32_
     int pool_ptr = 0;
     int sp = 0;
 
-    // Fallback for CPU
+    // CPU Fallback handling
 #ifndef __CUDA_ARCH__
     std::vector<Span> pool_vec;
     std::vector<StackEntry> stack_vec;
@@ -273,7 +273,7 @@ __host__ __device__ void getSpans(const Ray& ray, size_t* out_start_idx, uint32_
     }
 #endif
 
-    uint32_t current_op_count = 0; // Temp var for loop
+    uint32_t current_op_count = 0;
 
     for (size_t i = 0; i < tree.num_nodes; ++i) {
         size_t idx = tree.post_order_indexes[i];
@@ -284,22 +284,25 @@ __host__ __device__ void getSpans(const Ray& ray, size_t* out_start_idx, uint32_
         else if (type == ShapeType::Cylinder) processLeafNode<Cylinder>(ray, tree, idx, pool, pool_ptr, stack, sp, current_op_count);
         else if (type == ShapeType::Cone) processLeafNode<Cone>(ray, tree, idx, pool, pool_ptr, stack, sp, current_op_count);
         else {
-            // Operator
+            // --- OPERATOR ---
             if (sp < 2) { *out_count = 0; return; }
+
+            // Pop inputs
             uint32_t right_count = stack[--sp].count;
             int right_start = stack[sp].start;
             uint32_t left_count = stack[--sp].count;
             int left_start = stack[sp].start;
 
-            int result_start = pool_ptr;
+            // Result will be temporarily written to the end of the active buffer
+            int temp_result_start = pool_ptr;
             uint32_t result_count = 0;
 
-            // Heuristic check: operations sum counts
+            // Safety check against max allocated buffer
             if (pool_ptr + left_count + right_count > tree.max_pool_size) { *out_count = 0; return; }
 
             StridedSpan left_span(pool.at(left_start), pool.stride);
             StridedSpan right_span(pool.at(right_start), pool.stride);
-            StridedSpan result_span(pool.at(pool_ptr), pool.stride);
+            StridedSpan result_span(pool.at(temp_result_start), pool.stride);
 
             if (tree.nodes[idx].op == CSGOp::UNION)
                 unionSpans(left_span, left_count, right_span, right_count, result_span, result_count);
@@ -308,15 +311,30 @@ __host__ __device__ void getSpans(const Ray& ray, size_t* out_start_idx, uint32_
             else if (tree.nodes[idx].op == CSGOp::DIFFERENCE)
                 differenceSpans(left_span, left_count, right_span, right_count, result_span, result_count);
 
-            pool_ptr += result_count;
-            stack[sp].start = result_start;
+            // --- OPTIMIZATION START ---
+            // Move the result BACK to where 'Left' started.
+            // This reclaims the space used by Left and Right.
+
+            // Note: We use a manual copy loop because standard memmove isn't available/strided
+            // Since temp_result_start > left_start, we can copy forward safely.
+            StridedSpan target_span(pool.at(left_start), pool.stride);
+
+            for (uint32_t k = 0; k < result_count; ++k) {
+                target_span.data[k * target_span.stride] = result_span.data[k * result_span.stride];
+            }
+
+            // Reset pool pointer to immediately after the new result
+            pool_ptr = left_start + result_count;
+
+            // Push result onto stack (at the recycled position)
+            stack[sp].start = left_start;
             stack[sp].count = result_count;
             ++sp;
+            // --- OPTIMIZATION END ---
         }
     }
 
     if (sp > 0) {
-        // Return index to results in pool directly
         *out_count = stack[--sp].count;
         *out_start_idx = stack[sp].start;
     }
@@ -493,28 +511,75 @@ size_t computeMaxDepth(const FlatCSGTree& tree, size_t node_idx) {
     return 1 + ((left > right) ? left : right);
 }
 
+// Optimized: Simulates the stack operations to find the "High Water Mark" of memory usage.
+// This allows reusing memory from processed children, drastically reducing footprint.
 size_t computeTotalSpanUsage(const FlatCSGTree& tree) {
-    std::vector<size_t> usage(tree.num_nodes, 0);
-    size_t total_pool = 0;
+    if (tree.num_nodes == 0) return 0;
 
-    // Iterate in post-order (bottom up)
+    std::vector<size_t> stack_starts; // Tracks the start index of items on the simulated stack
+    std::vector<size_t> stack_counts; // Tracks the size of items on the simulated stack
+
+    // We track the 'current' pointer of the memory pool.
+    // Unlike the runtime pointer which moves back and forth, we need to track 
+    // the max necessary capacity relative to the base.
+    size_t pool_ptr = 0;
+    size_t max_pool_ptr = 0;
+
     for (size_t i = 0; i < tree.num_nodes; ++i) {
         size_t idx = tree.post_order_indexes[i];
+
         if (tree.nodes[idx].shape_type != ShapeType::TreeNode) {
-            // Leaf node: standard convex primitives usually return 1 span.
-            // (We assume 1 for simple convex, could be more for complex tori etc)
-            usage[idx] = 1;
+            // --- LEAF NODE ---
+            // Simulates: processLeafNode -> pushes 1 span (usually)
+            // In a robust system, this might be MAX_EXPECTED_LEAF_SPANS (e.g., 2 or 4)
+            size_t leaf_count = 1;
+
+            // Record where this leaf lives in the pool
+            stack_starts.push_back(pool_ptr);
+            stack_counts.push_back(leaf_count);
+
+            // Advance pool
+            pool_ptr += leaf_count;
         }
         else {
-            // Operator: allocates space for its result based on children
-            size_t left_idx = tree.left_indexes[idx];
-            size_t right_idx = tree.right_indexes[idx];
-            // Worst case: Union/Difference/Intersect can result in (left + right) spans
-            usage[idx] = usage[left_idx] + usage[right_idx];
+            // --- OPERATOR NODE ---
+            if (stack_counts.size() < 2) return 0; // Error safety
+
+            size_t right_count = stack_counts.back();
+            stack_counts.pop_back();
+            stack_starts.pop_back();
+
+            size_t left_count = stack_counts.back();
+            stack_counts.pop_back();
+            size_t left_start = stack_starts.back();
+            stack_starts.pop_back();
+
+            // Worst case result size is Sum of Inputs (standard for CSG)
+            size_t result_count = left_count + right_count;
+
+            // CRITICAL: At runtime, we hold Left + Right, and generate Result at the end.
+            // So Peak Usage = (Start of Right + Count of Right) + Result Count
+            size_t current_peak = pool_ptr + result_count;
+            if (current_peak > max_pool_ptr) {
+                max_pool_ptr = current_peak;
+            }
+
+            // After operation, we "Copy Back" result to where Left started.
+            // The memory used by Left and Right is effectively reclaimed.
+            // New state: Stack has Result at 'left_start'
+            pool_ptr = left_start + result_count;
+
+            stack_starts.push_back(left_start);
+            stack_counts.push_back(result_count);
         }
-        total_pool += usage[idx];
+
+        // Track global high water mark
+        if (pool_ptr > max_pool_ptr) {
+            max_pool_ptr = pool_ptr;
+        }
     }
-    return total_pool;
+
+    return max_pool_ptr;
 }
 
 

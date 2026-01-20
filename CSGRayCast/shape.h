@@ -5,7 +5,7 @@
 #include <cuda_runtime.h>
 #include "rayCast.h"
 
-constexpr size_t MAX_SHAPE_DATA_SIZE = 8;  // Largest shape size in number of floats
+constexpr size_t MAX_SHAPE_DATA_SIZE = 6;  // Largest shape size in number of floats
 
 struct Span {
     float t_entry, t_exit;
