@@ -18,40 +18,37 @@ template <typename T>
 __host__ __device__ void processLeafNode(
     const Ray& ray,
     const FlatCSGTree& tree,
-    size_t idx,
+    size_t node_idx, // The topology index
     StridedSpan& pool,
     int& pool_ptr,
     StridedStack& stack,
     int& sp,
     uint32_t& count
 ) {
-    // Bounds Check
     if (pool_ptr + 1 > tree.max_pool_size) { count = 0; return; }
 
-    // Load Data from Flat Array
+    // Indirection: Get the location in the compact data arrays
+    int32_t prim_idx = tree.nodes[node_idx].primitive_idx;
+
     float data[MAX_SHAPE_DATA_SIZE];
 
-    // Unrolling this loop often helps performance
+    // Read from the compact array using prim_idx, NOT node_idx
 #pragma unroll
     for (int j = 0; j < MAX_SHAPE_DATA_SIZE; ++j) {
-        data[j] = tree.data[idx * MAX_SHAPE_DATA_SIZE + j];
+        data[j] = tree.data[prim_idx * MAX_SHAPE_DATA_SIZE + j];
     }
 
-    // Construct the Shape (T)
     T shape(data);
 
-    // Set Material ID (optimized: don't copy full material struct)
-    shape.material_id = (int)idx;
+    // The Hit needs to store the material ID (which corresponds to the primitive index)
+    // so the tracer can look up color later.
+    shape.material_id = prim_idx;
 
-    // Compute Intersections
     int start = pool_ptr;
     uint32_t my_count = 0;
-
-    // Pass the specific pointer within the strided pool
     shape.getSpans(ray, pool.at(pool_ptr), my_count);
     pool_ptr += my_count;
 
-    // Push to Stack
     if (sp >= tree.max_stack_depth) { count = 0; return; }
     stack[sp].start = start;
     stack[sp].count = my_count;
@@ -386,36 +383,76 @@ __global__ void renderKernel(Color* image, const Camera cam, const Light light, 
     Span* global_pool, StackEntry* global_stack,
     size_t pixel_offset, size_t batch_size, size_t total_pixels)
 {
-    // Use Shared Memory for Tree Data
+    // --- 1. SHARED MEMORY SETUP ---
+    // We map the "extern" shared memory bytes to our struct pointers.
     extern __shared__ char smem[];
     FlatCSGTree shared_tree;
+
+    // Copy scalar counts
     shared_tree.num_nodes = tree.num_nodes;
-    char* ptr = smem;
-
-    // Allocation alignment
-    shared_tree.left_indexes = (size_t*)ptr; ptr += shared_tree.num_nodes * sizeof(size_t);
-    shared_tree.right_indexes = (size_t*)ptr; ptr += shared_tree.num_nodes * sizeof(size_t);
-    shared_tree.post_order_indexes = (size_t*)ptr; ptr += shared_tree.num_nodes * sizeof(size_t);
-    shared_tree.nodes = (FlatCSGNodeInfo*)ptr; ptr += shared_tree.num_nodes * sizeof(FlatCSGNodeInfo);
-    shared_tree.data = (float*)ptr; ptr += shared_tree.num_nodes * MAX_SHAPE_DATA_SIZE * sizeof(float);
-    shared_tree.red = (float*)ptr; ptr += shared_tree.num_nodes * sizeof(float);
-    shared_tree.green = (float*)ptr; ptr += shared_tree.num_nodes * sizeof(float);
-    shared_tree.blue = (float*)ptr; ptr += shared_tree.num_nodes * sizeof(float);
-    shared_tree.diffuse_coeff = (float*)ptr; ptr += shared_tree.num_nodes * sizeof(float);
-    shared_tree.specular_coeff = (float*)ptr; ptr += shared_tree.num_nodes * sizeof(float);
-    shared_tree.shininess = (float*)ptr; ptr += shared_tree.num_nodes * sizeof(float);
-
+    shared_tree.num_primitives = tree.num_primitives; // <--- Critical: use the compacted count
     shared_tree.max_pool_size = tree.max_pool_size;
     shared_tree.max_stack_depth = tree.max_stack_depth;
 
+    char* ptr = smem;
+
+    // --- A. TOPOLOGY POINTERS (Size = num_nodes) ---
+    // These describe the tree structure and are needed for every node (Leaf or Operator).
+
+    // Explicit alignment helps avoid issues, though usually char* is flexible.
+    // Ensure 8-byte alignment for the NodeInfo struct if needed.
+    shared_tree.nodes = (FlatCSGNodeInfo*)ptr;
+    ptr += shared_tree.num_nodes * sizeof(FlatCSGNodeInfo);
+
+    shared_tree.left_indexes = (size_t*)ptr;
+    ptr += shared_tree.num_nodes * sizeof(size_t);
+
+    shared_tree.right_indexes = (size_t*)ptr;
+    ptr += shared_tree.num_nodes * sizeof(size_t);
+
+    shared_tree.post_order_indexes = (size_t*)ptr;
+    ptr += shared_tree.num_nodes * sizeof(size_t);
+
+
+    // --- B. DATA POINTERS (Size = num_primitives) ---
+    // These only exist for the leaves. This is where we save huge amounts of memory.
+
+    shared_tree.data = (float*)ptr;
+    ptr += shared_tree.num_primitives * MAX_SHAPE_DATA_SIZE * sizeof(float);
+
+    shared_tree.red = (float*)ptr;
+    ptr += shared_tree.num_primitives * sizeof(float);
+
+    shared_tree.green = (float*)ptr;
+    ptr += shared_tree.num_primitives * sizeof(float);
+
+    shared_tree.blue = (float*)ptr;
+    ptr += shared_tree.num_primitives * sizeof(float);
+
+    shared_tree.diffuse_coeff = (float*)ptr;
+    ptr += shared_tree.num_primitives * sizeof(float);
+
+    shared_tree.specular_coeff = (float*)ptr;
+    ptr += shared_tree.num_primitives * sizeof(float);
+
+    shared_tree.shininess = (float*)ptr;
+    ptr += shared_tree.num_primitives * sizeof(float);
+
+
+    // --- 2. PARALLEL COPY FROM GLOBAL TO SHARED ---
     unsigned int local_id = threadIdx.x + threadIdx.y * blockDim.x;
     unsigned int stride = blockDim.x * blockDim.y;
 
+    // Loop 1: Copy Topology (runs up to num_nodes)
     for (size_t i = local_id; i < shared_tree.num_nodes; i += stride) {
         shared_tree.nodes[i] = tree.nodes[i];
         shared_tree.left_indexes[i] = tree.left_indexes[i];
         shared_tree.right_indexes[i] = tree.right_indexes[i];
         shared_tree.post_order_indexes[i] = tree.post_order_indexes[i];
+    }
+
+    // Loop 2: Copy Material Data (runs up to num_primitives)
+    for (size_t i = local_id; i < shared_tree.num_primitives; i += stride) {
         shared_tree.red[i] = tree.red[i];
         shared_tree.green[i] = tree.green[i];
         shared_tree.blue[i] = tree.blue[i];
@@ -424,63 +461,85 @@ __global__ void renderKernel(Color* image, const Camera cam, const Light light, 
         shared_tree.shininess[i] = tree.shininess[i];
     }
 
-    size_t data_size = shared_tree.num_nodes * MAX_SHAPE_DATA_SIZE;
-    for (size_t i = local_id; i < data_size; i += stride) {
+    // Loop 3: Copy Shape Data (runs up to num_primitives * 8 floats)
+    size_t total_floats = shared_tree.num_primitives * MAX_SHAPE_DATA_SIZE;
+    for (size_t i = local_id; i < total_floats; i += stride) {
         shared_tree.data[i] = tree.data[i];
     }
+
+    // Wait for all threads to finish copying before rendering
     __syncthreads();
 
-    // --- BATCH PROCESSING LOGIC ---
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid >= batch_size) return;
 
+    // --- 3. RENDERING ---
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+    // Bounds check
+    if (tid >= batch_size) return;
     size_t global_idx = pixel_offset + tid;
     if (global_idx >= total_pixels) return;
 
+    // Setup Pixel Coordinates
     int width = cam.getWidth();
     int x = global_idx % width;
     int y = global_idx / width;
 
-    // --- STRIDED MEMORY SETUP ---
-    // Start at: global_base + tid
-    // Stride: batch_size
-    // This creates an interleaved memory pattern:
-    // Thread 0: [0, batch, 2*batch ...]
-    // Thread 1: [1, batch+1, 2*batch+1 ...]
+    // Setup Memory Pools (Strided for coalesced access)
     StridedSpan my_pool(global_pool + tid, batch_size);
     StridedStack my_stack(global_stack + tid, batch_size);
 
+    // Generate Ray
     float s = (x + 0.5f) / width;
     float t = (y + 0.5f) / cam.getHeight();
     Ray ray = cam.getRay(s, t);
 
+    // Trace
     image[global_idx] = trace(ray, light, shared_tree, my_pool, my_stack);
 }
 
+// [tracer.cu]
+
 void copyTreeToDevice(const FlatCSGTree& h_tree, FlatCSGTree& d_tree) {
-    checkCudaError(cudaMalloc(&d_tree.nodes, h_tree.num_nodes * sizeof(FlatCSGNodeInfo)), "cudaMalloc d_tree.nodes");
-    checkCudaError(cudaMemcpy(d_tree.nodes, h_tree.nodes, h_tree.num_nodes * sizeof(FlatCSGNodeInfo), cudaMemcpyHostToDevice), "cudaMemcpy d_tree.nodes");
-    checkCudaError(cudaMalloc(&d_tree.data, h_tree.num_nodes * MAX_SHAPE_DATA_SIZE * sizeof(float)), "cudaMalloc d_tree.data");
-    checkCudaError(cudaMemcpy(d_tree.data, h_tree.data, h_tree.num_nodes * MAX_SHAPE_DATA_SIZE * sizeof(float), cudaMemcpyHostToDevice), "cudaMemcpy d_tree.data");
-    checkCudaError(cudaMalloc(&d_tree.red, h_tree.num_nodes * sizeof(float)), "cudaMalloc d_tree.red");
-    checkCudaError(cudaMemcpy(d_tree.red, h_tree.red, h_tree.num_nodes * sizeof(float), cudaMemcpyHostToDevice), "cudaMemcpy d_tree.red");
-    checkCudaError(cudaMalloc(&d_tree.green, h_tree.num_nodes * sizeof(float)), "cudaMalloc d_tree.green");
-    checkCudaError(cudaMemcpy(d_tree.green, h_tree.green, h_tree.num_nodes * sizeof(float), cudaMemcpyHostToDevice), "cudaMemcpy d_tree.green");
-    checkCudaError(cudaMalloc(&d_tree.blue, h_tree.num_nodes * sizeof(float)), "cudaMalloc d_tree.blue");
-    checkCudaError(cudaMemcpy(d_tree.blue, h_tree.blue, h_tree.num_nodes * sizeof(float), cudaMemcpyHostToDevice), "cudaMemcpy d_tree.blue");
-    checkCudaError(cudaMalloc(&d_tree.diffuse_coeff, h_tree.num_nodes * sizeof(float)), "cudaMalloc d_tree.diffuse_coeff");
-    checkCudaError(cudaMemcpy(d_tree.diffuse_coeff, h_tree.diffuse_coeff, h_tree.num_nodes * sizeof(float), cudaMemcpyHostToDevice), "cudaMemcpy d_tree.diffuse_coeff");
-    checkCudaError(cudaMalloc(&d_tree.specular_coeff, h_tree.num_nodes * sizeof(float)), "cudaMalloc d_tree.specular_coeff");
-    checkCudaError(cudaMemcpy(d_tree.specular_coeff, h_tree.specular_coeff, h_tree.num_nodes * sizeof(float), cudaMemcpyHostToDevice), "cudaMemcpy d_tree.specular_coeff");
-    checkCudaError(cudaMalloc(&d_tree.shininess, h_tree.num_nodes * sizeof(float)), "cudaMalloc d_tree.shininess");
-    checkCudaError(cudaMemcpy(d_tree.shininess, h_tree.shininess, h_tree.num_nodes * sizeof(float), cudaMemcpyHostToDevice), "cudaMemcpy d_tree.shininess");
-    checkCudaError(cudaMalloc(&d_tree.left_indexes, h_tree.num_nodes * sizeof(size_t)), "cudaMalloc d_tree.left_indexes");
-    checkCudaError(cudaMemcpy(d_tree.left_indexes, h_tree.left_indexes, h_tree.num_nodes * sizeof(size_t), cudaMemcpyHostToDevice), "cudaMemcpy d_tree.left_indexes");
-    checkCudaError(cudaMalloc(&d_tree.right_indexes, h_tree.num_nodes * sizeof(size_t)), "cudaMalloc d_tree.right_indexes");
-    checkCudaError(cudaMemcpy(d_tree.right_indexes, h_tree.right_indexes, h_tree.num_nodes * sizeof(size_t), cudaMemcpyHostToDevice), "cudaMemcpy d_tree.right_indexes");
-    checkCudaError(cudaMalloc(&d_tree.post_order_indexes, h_tree.num_nodes * sizeof(size_t)), "cudaMalloc d_tree.post_order_indexes");
-    checkCudaError(cudaMemcpy(d_tree.post_order_indexes, h_tree.post_order_indexes, h_tree.num_nodes * sizeof(size_t), cudaMemcpyHostToDevice), "cudaMemcpy d_tree.post_order_indexes");
+    // 1. Topology Data (Size = num_nodes)
+    checkCudaError(cudaMalloc(&d_tree.nodes, h_tree.num_nodes * sizeof(FlatCSGNodeInfo)), "alloc nodes");
+    checkCudaError(cudaMemcpy(d_tree.nodes, h_tree.nodes, h_tree.num_nodes * sizeof(FlatCSGNodeInfo), cudaMemcpyHostToDevice), "copy nodes");
+
+    checkCudaError(cudaMalloc(&d_tree.left_indexes, h_tree.num_nodes * sizeof(size_t)), "alloc left");
+    checkCudaError(cudaMemcpy(d_tree.left_indexes, h_tree.left_indexes, h_tree.num_nodes * sizeof(size_t), cudaMemcpyHostToDevice), "copy left");
+
+    checkCudaError(cudaMalloc(&d_tree.right_indexes, h_tree.num_nodes * sizeof(size_t)), "alloc right");
+    checkCudaError(cudaMemcpy(d_tree.right_indexes, h_tree.right_indexes, h_tree.num_nodes * sizeof(size_t), cudaMemcpyHostToDevice), "copy right");
+
+    checkCudaError(cudaMalloc(&d_tree.post_order_indexes, h_tree.num_nodes * sizeof(size_t)), "alloc post");
+    checkCudaError(cudaMemcpy(d_tree.post_order_indexes, h_tree.post_order_indexes, h_tree.num_nodes * sizeof(size_t), cudaMemcpyHostToDevice), "copy post");
+
+    // 2. Shape/Material Data (Size = num_primitives) - COMPACT!
+    // If num_primitives is 0 (unlikely), malloc might return null or behave oddly, so safety check usually good.
+    size_t prim_count = h_tree.num_primitives;
+
+    checkCudaError(cudaMalloc(&d_tree.data, prim_count * MAX_SHAPE_DATA_SIZE * sizeof(float)), "alloc data");
+    checkCudaError(cudaMemcpy(d_tree.data, h_tree.data, prim_count * MAX_SHAPE_DATA_SIZE * sizeof(float), cudaMemcpyHostToDevice), "copy data");
+
+    checkCudaError(cudaMalloc(&d_tree.red, prim_count * sizeof(float)), "alloc red");
+    checkCudaError(cudaMemcpy(d_tree.red, h_tree.red, prim_count * sizeof(float), cudaMemcpyHostToDevice), "copy red");
+
+    checkCudaError(cudaMalloc(&d_tree.green, prim_count * sizeof(float)), "alloc green");
+    checkCudaError(cudaMemcpy(d_tree.green, h_tree.green, prim_count * sizeof(float), cudaMemcpyHostToDevice), "copy green");
+
+    checkCudaError(cudaMalloc(&d_tree.blue, prim_count * sizeof(float)), "alloc blue");
+    checkCudaError(cudaMemcpy(d_tree.blue, h_tree.blue, prim_count * sizeof(float), cudaMemcpyHostToDevice), "copy blue");
+
+    checkCudaError(cudaMalloc(&d_tree.diffuse_coeff, prim_count * sizeof(float)), "alloc diffuse");
+    checkCudaError(cudaMemcpy(d_tree.diffuse_coeff, h_tree.diffuse_coeff, prim_count * sizeof(float), cudaMemcpyHostToDevice), "copy diffuse");
+
+    checkCudaError(cudaMalloc(&d_tree.specular_coeff, prim_count * sizeof(float)), "alloc specular");
+    checkCudaError(cudaMemcpy(d_tree.specular_coeff, h_tree.specular_coeff, prim_count * sizeof(float), cudaMemcpyHostToDevice), "copy specular");
+
+    checkCudaError(cudaMalloc(&d_tree.shininess, prim_count * sizeof(float)), "alloc shininess");
+    checkCudaError(cudaMemcpy(d_tree.shininess, h_tree.shininess, prim_count * sizeof(float), cudaMemcpyHostToDevice), "copy shininess");
+
     d_tree.num_nodes = h_tree.num_nodes;
+    d_tree.num_primitives = h_tree.num_primitives;
     d_tree.max_pool_size = h_tree.max_pool_size;
     d_tree.max_stack_depth = h_tree.max_stack_depth;
 }

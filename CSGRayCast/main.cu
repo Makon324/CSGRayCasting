@@ -28,11 +28,79 @@ void cpuRender(Color* h_image, const Camera& cam, const Light& light, const Flat
     }
 }
 
+void compactTreeMemory(FlatCSGTree& tree) {
+    size_t num_nodes = tree.num_nodes;
+    size_t prim_count = 0;
+
+    // 1. Calculate Primitive Count and Assign Indices
+    for (size_t i = 0; i < num_nodes; ++i) {
+        if (tree.nodes[i].shape_type != ShapeType::TreeNode) {
+            tree.nodes[i].primitive_idx = (int32_t)prim_count++;
+        }
+        else {
+            tree.nodes[i].primitive_idx = -1;
+        }
+    }
+    tree.num_primitives = prim_count;
+
+    std::cout << "Compacting Tree: " << num_nodes << " nodes -> " << prim_count << " primitives." << std::endl;
+
+    // 2. Allocate New Compact Buffers
+    float* new_data = new float[prim_count * MAX_SHAPE_DATA_SIZE];
+    float* new_red = new float[prim_count];
+    float* new_green = new float[prim_count];
+    float* new_blue = new float[prim_count];
+    float* new_diff = new float[prim_count];
+    float* new_spec = new float[prim_count];
+    float* new_shin = new float[prim_count];
+
+    // 3. Move Data
+    for (size_t i = 0; i < num_nodes; ++i) {
+        int32_t p_idx = tree.nodes[i].primitive_idx;
+        if (p_idx != -1) {
+            // Copy Shape Data
+            std::memcpy(&new_data[p_idx * MAX_SHAPE_DATA_SIZE],
+                &tree.data[i * MAX_SHAPE_DATA_SIZE],
+                MAX_SHAPE_DATA_SIZE * sizeof(float));
+
+            // Copy Materials
+            new_red[p_idx] = tree.red[i];
+            new_green[p_idx] = tree.green[i];
+            new_blue[p_idx] = tree.blue[i];
+            new_diff[p_idx] = tree.diffuse_coeff[i];
+            new_spec[p_idx] = tree.specular_coeff[i];
+            new_shin[p_idx] = tree.shininess[i];
+        }
+    }
+
+    // 4. Swap and Delete Old Buffers
+    delete[] tree.data; tree.data = new_data;
+    delete[] tree.red; tree.red = new_red;
+    delete[] tree.green; tree.green = new_green;
+    delete[] tree.blue; tree.blue = new_blue;
+    delete[] tree.diffuse_coeff; tree.diffuse_coeff = new_diff;
+    delete[] tree.specular_coeff; tree.specular_coeff = new_spec;
+    delete[] tree.shininess; tree.shininess = new_shin;
+}
+
 void gpuRender(Color* h_image, Color* d_image, const Camera& cam, const Light& light, const FlatCSGTree& d_tree,
     Span* d_global_pool, StackEntry* d_global_stack, size_t batch_size) {
 
     // Shared memory size calculation
-    size_t shared_size = d_tree.num_nodes * (sizeof(FlatCSGNodeInfo) + MAX_SHAPE_DATA_SIZE * sizeof(float) + 6 * sizeof(float) + 3 * sizeof(size_t));
+    size_t shared_size =
+        // Topology (per Node)
+        d_tree.num_nodes * (
+            sizeof(FlatCSGNodeInfo) +
+            3 * sizeof(size_t)        // left, right, post_order
+            ) +
+        // Data (per Primitive)
+        d_tree.num_primitives * (
+            MAX_SHAPE_DATA_SIZE * sizeof(float) + // Shape data
+            6 * sizeof(float)                     // Material props (rgb + 3 coeffs)
+            );
+
+    // Align shared_size to be safe (optional but recommended)
+    if (shared_size % 8 != 0) shared_size += (8 - (shared_size % 8));
 
     size_t total_pixels = static_cast<size_t>(WIDTH) * HEIGHT;    
 
@@ -95,6 +163,8 @@ int main(int argc, char** argv) {
         std::cerr << "[Error] The scene file is empty or contains no valid nodes." << std::endl;
         return 1;
     }
+
+    compactTreeMemory(h_tree);
 
     // Compute sizes based on tree
     h_tree.max_pool_size = computeTotalSpanUsage(h_tree);
