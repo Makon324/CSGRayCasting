@@ -10,18 +10,19 @@ enum class ShapeType : uint16_t { TreeNode, Sphere, Cuboid, Cylinder, Cone };
 
 struct alignas(4) FlatCSGNodeInfo {
     CSGOp op;
-    ShapeType shape_type;
-    int32_t primitive_idx; // -1 for operators, 0..N for leaves
+    ShapeType shape_type;    
 };
 
 struct FlatCSGTree {
     size_t num_nodes;
-    size_t num_primitives; // NEW: Count of actual shapes
+    size_t num_primitives; // Count of actual shapes
 
     FlatCSGNodeInfo* nodes;
 
-    // These arrays are now sized to [num_primitives] instead of [num_nodes]
-    float* data;
+    int32_t* primitive_idx; // -1 for operators, 0..N for leaves
+
+    // Arrays for primitive shape data
+	float* data;  // sized to [num_primitives * MAX_SHAPE_DATA_SIZE]
     float* red;
     float* green;
     float* blue;
@@ -29,7 +30,7 @@ struct FlatCSGTree {
     float* specular_coeff;
     float* shininess;
 
-    // Topology remains sized to [num_nodes]
+    // Topology data
     size_t* left_indexes;
     size_t* right_indexes;
     size_t* post_order_indexes;

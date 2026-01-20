@@ -22,7 +22,8 @@ struct Vec3 {
 };
 
 struct Ray {
-    Vec3 origin, dir;
+    Vec3 origin;
+	Vec3 dir;
     __host__ __device__ Ray(const Vec3& o, const Vec3& d) : origin(o), dir(d.normalize()) {}
     __host__ __device__ Vec3 at(float t) const { return origin + dir * t; }
 };
@@ -35,16 +36,16 @@ struct Color {
 };
 
 struct Material {
-    Color color;          // Diffuse color, combined with ambient
+    Color color;
     float diffuse_coeff;
-    float specular_coeff; // Specular coefficient (0-1)
-    float shininess;      // Shininess exponent
+    float specular_coeff;
+    float shininess;
     __host__ __device__ Material() : color(0), diffuse_coeff(0), specular_coeff(0), shininess(0) {}
     __host__ __device__ Material(Color c, float dc, float sc, float sh) : color(c), diffuse_coeff(dc), specular_coeff(sc), shininess(sh) {}
 };
 
 struct Hit {
-    Vec3 normal;          // Outward normal
+    Vec3 normal;           // Outward normal
     uint32_t node_id;      // Index into the FlatCSGTree material arrays
 
     __host__ __device__ Hit() : normal(0), node_id(0) {}
@@ -87,11 +88,9 @@ struct Camera {
         Vec3 dir = origin - lookat;
         float r_xz = sqrtf(dir.x * dir.x + dir.z * dir.z);
 
-        // FIX: Use atan2(z, x) for standard angle
         float current_angle = atan2(dir.z, dir.x);
         float new_angle = current_angle + delta_angle;
 
-        // FIX: Standard Polar Coordinates (x = cos, z = sin)
         origin.x = lookat.x + r_xz * cosf(new_angle);
         origin.z = lookat.z + r_xz * sinf(new_angle);
 
@@ -113,7 +112,6 @@ struct Camera {
         origin.y = lookat.y + r * sinf(new_pitch);
         float r_xz = r * cosf(new_pitch);
 
-        // FIX: Must match the Horizontal logic (atan2(z, x) and cos/sin)
         float theta = atan2(dir.z, dir.x);
         origin.x = lookat.x + r_xz * cosf(theta);
         origin.z = lookat.z + r_xz * sinf(theta);
@@ -130,11 +128,8 @@ struct Light {
     __host__ __device__ Light(const Vec3& dir) : direction(dir.normalize()) {}
 
     __host__ __device__ void rotateHorizontal(float delta_angle) {
-        // Convert to Polar, rotate, convert back
-        // This is more robust than the manual rotation matrix in the original code
         float r_xz = sqrtf(direction.x * direction.x + direction.z * direction.z);
 
-        // FIX: Standard atan2(z, x)
         float current_angle = atan2(direction.z, direction.x);
         float new_angle = current_angle + delta_angle;
 
@@ -156,7 +151,6 @@ struct Light {
         direction.y = r * sinf(new_pitch);
         float r_xz = r * cosf(new_pitch);
 
-        // FIX: Match standard math
         float theta = atan2f(direction.z, direction.x);
         direction.x = r_xz * cosf(theta);
         direction.z = r_xz * sinf(theta);

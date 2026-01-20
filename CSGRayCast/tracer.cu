@@ -28,11 +28,11 @@ __host__ __device__ void processLeafNode(
     if (pool_ptr + 1 > tree.max_pool_size) { count = 0; return; }
 
     // Indirection: Get the location in the compact data arrays
-    int32_t prim_idx = tree.nodes[node_idx].primitive_idx;
+    int32_t prim_idx = tree.primitive_idx[node_idx];
 
     float data[MAX_SHAPE_DATA_SIZE];
 
-    // Read from the compact array using prim_idx, NOT node_idx
+    // Read from the compact array using prim_idx
 #pragma unroll
     for (int j = 0; j < MAX_SHAPE_DATA_SIZE; ++j) {
         data[j] = tree.data[prim_idx * MAX_SHAPE_DATA_SIZE + j];
@@ -40,9 +40,7 @@ __host__ __device__ void processLeafNode(
 
     T shape(data);
 
-    // The Hit needs to store the material ID (which corresponds to the primitive index)
-    // so the tracer can look up color later.
-    shape.material_id = prim_idx;
+    shape.node_id = prim_idx;
 
     int start = pool_ptr;
     uint32_t my_count = 0;
@@ -77,10 +75,10 @@ __host__ __device__ void unionSpans(
     uint32_t li = 0;
     uint32_t ri = 0;
 
-    // Registers for the "current active union interval"
+    // Registers for the current active union interval
     Span current;
 
-    // 1. Initialize 'current' with the earliest span from either left or right
+    // Initialize current with the earliest span from either left or right
     bool take_left = false;
     if (li < left_count && ri < right_count) {
         if (left[li].t_entry < right[ri].t_entry) take_left = true;
@@ -97,7 +95,7 @@ __host__ __device__ void unionSpans(
         current = right[ri++];
     }
 
-    // 2. Stream through the remaining spans
+    // Stream through the remaining spans
     while (li < left_count || ri < right_count) {
         Span next;
 
@@ -118,7 +116,7 @@ __host__ __device__ void unionSpans(
             next = right[ri++];
         }
 
-        // 3. Merge Logic
+        // Merge Logic
         // If the next span starts before (or exactly when) the current one ends: Overlap
         if (next.t_entry <= current.t_exit + 1e-6f) {
             // Extend the current interval if the new one goes further
@@ -128,7 +126,7 @@ __host__ __device__ void unionSpans(
             }
         }
         else {
-            // Disjoint: Write the finished 'current' to result
+            // Disjoint: Write the finished current to result
             result[result_count++] = current;
 
             // Start a new interval
@@ -136,7 +134,7 @@ __host__ __device__ void unionSpans(
         }
     }
 
-    // 4. Write the final pending interval
+    // Write the final pending interval
     result[result_count++] = current;
 }
 
@@ -190,12 +188,12 @@ __host__ __device__ void differenceSpans(
     StridedSpan& result, uint32_t& result_count)
 {
     result_count = 0;
-    uint32_t ri_base = 0; // Tracks the first potential 'Right' span for the current 'Left'
+    uint32_t ri_base = 0; // Tracks the first potential Right span for the current Left
 
     for (uint32_t li = 0; li < left_count; ++li) {
         Span curr = left[li]; // Load current Left span into register
 
-        // Iterate through Right spans that might overlap 'curr'
+        // Iterate through Right spans that might overlap curr
         for (uint32_t ri = ri_base; ri < right_count; ++ri) {
             Span sub = right[ri];
 
@@ -214,7 +212,7 @@ __host__ __device__ void differenceSpans(
 
             // --- Overlap Logic ---
 
-            // 1. If there is a gap between Current Start and Subtractor Start, keep that segment.
+            // If there is a gap between Current Start and Subtractor Start, keep that segment.
             if (sub.t_entry > curr.t_entry) {
                 Span valid_segment;
                 valid_segment.t_entry = curr.t_entry;
@@ -222,19 +220,19 @@ __host__ __device__ void differenceSpans(
 
                 valid_segment.t_exit = sub.t_entry;
                 valid_segment.exit_hit = sub.entry_hit;
-                valid_segment.exit_hit.normal = -valid_segment.exit_hit.normal; // Invert normal
+                valid_segment.exit_hit.normal = -valid_segment.exit_hit.normal;  // Invert normal
 
                 result[result_count++] = valid_segment;
             }
 
-            // 2. Cut the beginning of 'curr' by moving t_entry to the end of the subtractor
+            // Cut the beginning of curr by moving t_entry to the end of the subtractor
             if (sub.t_exit > curr.t_entry) {
                 curr.t_entry = sub.t_exit;
                 curr.entry_hit = sub.exit_hit;
                 curr.entry_hit.normal = -curr.entry_hit.normal; // Invert normal
             }
 
-            // 3. If 'curr' has been completely eaten, stop processing it
+            // If curr has been completely eaten, stop processing it
             if (curr.t_entry >= curr.t_exit) {
                 break;
             }
@@ -280,8 +278,7 @@ __host__ __device__ void getSpans(const Ray& ray, size_t* out_start_idx, uint32_
         else if (type == ShapeType::Cuboid) processLeafNode<Cuboid>(ray, tree, idx, pool, pool_ptr, stack, sp, current_op_count);
         else if (type == ShapeType::Cylinder) processLeafNode<Cylinder>(ray, tree, idx, pool, pool_ptr, stack, sp, current_op_count);
         else if (type == ShapeType::Cone) processLeafNode<Cone>(ray, tree, idx, pool, pool_ptr, stack, sp, current_op_count);
-        else {
-            // --- OPERATOR ---
+        else {  // OPERATOR            
             if (sp < 2) { *out_count = 0; return; }
 
             // Pop inputs
@@ -308,12 +305,9 @@ __host__ __device__ void getSpans(const Ray& ray, size_t* out_start_idx, uint32_
             else if (tree.nodes[idx].op == CSGOp::DIFFERENCE)
                 differenceSpans(left_span, left_count, right_span, right_count, result_span, result_count);
 
-            // --- OPTIMIZATION START ---
+
             // Move the result BACK to where 'Left' started.
             // This reclaims the space used by Left and Right.
-
-            // Note: We use a manual copy loop because standard memmove isn't available/strided
-            // Since temp_result_start > left_start, we can copy forward safely.
             StridedSpan target_span(pool.at(left_start), pool.stride);
 
             for (uint32_t k = 0; k < result_count; ++k) {
@@ -327,7 +321,6 @@ __host__ __device__ void getSpans(const Ray& ray, size_t* out_start_idx, uint32_
             stack[sp].start = left_start;
             stack[sp].count = result_count;
             ++sp;
-            // --- OPTIMIZATION END ---
         }
     }
 
@@ -354,18 +347,18 @@ __host__ __device__ Color trace(const Ray& ray, const Light& light, const FlatCS
     if (min_t >= 1e30f) return Color(0, 0, 0);
 
     // Look up material data at the very end
-    int mat_id = hit.node_id;
+    int32_t node_id = hit.node_id;
 
     Color mat_color(0.5f, 0.5f, 0.5f);
     float diff_coeff = 0.5f;
     float spec_coeff = 0.5f;
     float shininess = 10.0f;
 
-    if (mat_id >= 0) {
-        mat_color = Color(tree.red[mat_id], tree.green[mat_id], tree.blue[mat_id]);
-        diff_coeff = tree.diffuse_coeff[mat_id];
-        spec_coeff = tree.specular_coeff[mat_id];
-        shininess = tree.shininess[mat_id];
+    if (node_id >= 0) {
+        mat_color = Color(tree.red[node_id], tree.green[node_id], tree.blue[node_id]);
+        diff_coeff = tree.diffuse_coeff[node_id];
+        spec_coeff = tree.specular_coeff[node_id];
+        shininess = tree.shininess[node_id];
     }
 
     Vec3 point = ray.at(min_t);
@@ -383,24 +376,22 @@ __global__ void renderKernel(Color* image, const Camera cam, const Light light, 
     Span* global_pool, StackEntry* global_stack,
     size_t pixel_offset, size_t batch_size, size_t total_pixels)
 {
-    // --- 1. SHARED MEMORY SETUP ---
-    // We map the "extern" shared memory bytes to our struct pointers.
+    // SHARED MEMORY SETUP
+    // We map the extern shared memory bytes to our struct pointers.
     extern __shared__ char smem[];
     FlatCSGTree shared_tree;
 
     // Copy scalar counts
     shared_tree.num_nodes = tree.num_nodes;
-    shared_tree.num_primitives = tree.num_primitives; // <--- Critical: use the compacted count
+    shared_tree.num_primitives = tree.num_primitives;
     shared_tree.max_pool_size = tree.max_pool_size;
     shared_tree.max_stack_depth = tree.max_stack_depth;
 
     char* ptr = smem;
 
-    // --- A. TOPOLOGY POINTERS (Size = num_nodes) ---
+    // TOPOLOGY POINTERS (Size = num_nodes)
     // These describe the tree structure and are needed for every node (Leaf or Operator).
 
-    // Explicit alignment helps avoid issues, though usually char* is flexible.
-    // Ensure 8-byte alignment for the NodeInfo struct if needed.
     shared_tree.nodes = (FlatCSGNodeInfo*)ptr;
     ptr += shared_tree.num_nodes * sizeof(FlatCSGNodeInfo);
 
@@ -410,11 +401,14 @@ __global__ void renderKernel(Color* image, const Camera cam, const Light light, 
     shared_tree.right_indexes = (size_t*)ptr;
     ptr += shared_tree.num_nodes * sizeof(size_t);
 
+    shared_tree.primitive_idx = (int32_t*)ptr;
+    ptr += shared_tree.num_nodes * sizeof(int32_t);
+
     shared_tree.post_order_indexes = (size_t*)ptr;
     ptr += shared_tree.num_nodes * sizeof(size_t);
 
 
-    // --- B. DATA POINTERS (Size = num_primitives) ---
+    // DATA POINTERS (Size = num_primitives)
     // These only exist for the leaves. This is where we save huge amounts of memory.
 
     shared_tree.data = (float*)ptr;
@@ -439,19 +433,20 @@ __global__ void renderKernel(Color* image, const Camera cam, const Light light, 
     ptr += shared_tree.num_primitives * sizeof(float);
 
 
-    // --- 2. PARALLEL COPY FROM GLOBAL TO SHARED ---
+    // COPY FROM GLOBAL TO SHARED
     unsigned int local_id = threadIdx.x + threadIdx.y * blockDim.x;
     unsigned int stride = blockDim.x * blockDim.y;
 
-    // Loop 1: Copy Topology (runs up to num_nodes)
+    // Copy Topology (runs up to num_nodes)
     for (size_t i = local_id; i < shared_tree.num_nodes; i += stride) {
         shared_tree.nodes[i] = tree.nodes[i];
         shared_tree.left_indexes[i] = tree.left_indexes[i];
         shared_tree.right_indexes[i] = tree.right_indexes[i];
+        shared_tree.primitive_idx[i] = tree.primitive_idx[i];
         shared_tree.post_order_indexes[i] = tree.post_order_indexes[i];
     }
 
-    // Loop 2: Copy Material Data (runs up to num_primitives)
+    // Copy Material Data (runs up to num_primitives)
     for (size_t i = local_id; i < shared_tree.num_primitives; i += stride) {
         shared_tree.red[i] = tree.red[i];
         shared_tree.green[i] = tree.green[i];
@@ -461,7 +456,7 @@ __global__ void renderKernel(Color* image, const Camera cam, const Light light, 
         shared_tree.shininess[i] = tree.shininess[i];
     }
 
-    // Loop 3: Copy Shape Data (runs up to num_primitives * 8 floats)
+    // Copy Shape Data (runs up to num_primitives * 8 floats)
     size_t total_floats = shared_tree.num_primitives * MAX_SHAPE_DATA_SIZE;
     for (size_t i = local_id; i < total_floats; i += stride) {
         shared_tree.data[i] = tree.data[i];
@@ -471,7 +466,7 @@ __global__ void renderKernel(Color* image, const Camera cam, const Light light, 
     __syncthreads();
 
 
-    // --- 3. RENDERING ---
+    // RENDERING
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
     // Bounds check
@@ -497,10 +492,8 @@ __global__ void renderKernel(Color* image, const Camera cam, const Light light, 
     image[global_idx] = trace(ray, light, shared_tree, my_pool, my_stack);
 }
 
-// [tracer.cu]
-
 void copyTreeToDevice(const FlatCSGTree& h_tree, FlatCSGTree& d_tree) {
-    // 1. Topology Data (Size = num_nodes)
+    // Topology Data (Size = num_nodes)
     checkCudaError(cudaMalloc(&d_tree.nodes, h_tree.num_nodes * sizeof(FlatCSGNodeInfo)), "alloc nodes");
     checkCudaError(cudaMemcpy(d_tree.nodes, h_tree.nodes, h_tree.num_nodes * sizeof(FlatCSGNodeInfo), cudaMemcpyHostToDevice), "copy nodes");
 
@@ -513,8 +506,10 @@ void copyTreeToDevice(const FlatCSGTree& h_tree, FlatCSGTree& d_tree) {
     checkCudaError(cudaMalloc(&d_tree.post_order_indexes, h_tree.num_nodes * sizeof(size_t)), "alloc post");
     checkCudaError(cudaMemcpy(d_tree.post_order_indexes, h_tree.post_order_indexes, h_tree.num_nodes * sizeof(size_t), cudaMemcpyHostToDevice), "copy post");
 
-    // 2. Shape/Material Data (Size = num_primitives) - COMPACT!
-    // If num_primitives is 0 (unlikely), malloc might return null or behave oddly, so safety check usually good.
+    checkCudaError(cudaMalloc(&d_tree.primitive_idx, h_tree.num_nodes * sizeof(int32_t)), "alloc prim_idx");
+    checkCudaError(cudaMemcpy(d_tree.primitive_idx, h_tree.primitive_idx, h_tree.num_nodes * sizeof(int32_t), cudaMemcpyHostToDevice), "copy prim_idx");
+
+    // Shape/Material Data (Size = num_primitives)
     size_t prim_count = h_tree.num_primitives;
 
     checkCudaError(cudaMalloc(&d_tree.data, prim_count * MAX_SHAPE_DATA_SIZE * sizeof(float)), "alloc data");
@@ -545,7 +540,14 @@ void copyTreeToDevice(const FlatCSGTree& h_tree, FlatCSGTree& d_tree) {
 }
 
 void freeDeviceTree(FlatCSGTree& d_tree) {
+    // Topology arrays
     checkCudaError(cudaFree(d_tree.nodes), "cudaFree d_tree.nodes");
+    checkCudaError(cudaFree(d_tree.primitive_idx), "cudaFree d_tree.primitive_idx");
+    checkCudaError(cudaFree(d_tree.left_indexes), "cudaFree d_tree.left_indexes");
+    checkCudaError(cudaFree(d_tree.right_indexes), "cudaFree d_tree.right_indexes");
+    checkCudaError(cudaFree(d_tree.post_order_indexes), "cudaFree d_tree.post_order_indexes");
+
+    // Data arrays
     checkCudaError(cudaFree(d_tree.data), "cudaFree d_tree.data");
     checkCudaError(cudaFree(d_tree.red), "cudaFree d_tree.red");
     checkCudaError(cudaFree(d_tree.green), "cudaFree d_tree.green");
@@ -553,16 +555,26 @@ void freeDeviceTree(FlatCSGTree& d_tree) {
     checkCudaError(cudaFree(d_tree.diffuse_coeff), "cudaFree d_tree.diffuse_coeff");
     checkCudaError(cudaFree(d_tree.specular_coeff), "cudaFree d_tree.specular_coeff");
     checkCudaError(cudaFree(d_tree.shininess), "cudaFree d_tree.shininess");
-    checkCudaError(cudaFree(d_tree.left_indexes), "cudaFree d_tree.left_indexes");
-    checkCudaError(cudaFree(d_tree.right_indexes), "cudaFree d_tree.right_indexes");
-    checkCudaError(cudaFree(d_tree.post_order_indexes), "cudaFree d_tree.post_order_indexes");
 }
 
 void freeHostTree(FlatCSGTree& tree) {
-    delete[] tree.nodes; delete[] tree.data; delete[] tree.red; delete[] tree.green; delete[] tree.blue;
-    delete[] tree.diffuse_coeff; delete[] tree.specular_coeff; delete[] tree.shininess;
-    delete[] tree.left_indexes; delete[] tree.right_indexes; delete[] tree.post_order_indexes;
+    // Topology arrays
+    delete[] tree.nodes;
+    delete[] tree.primitive_idx;
+    delete[] tree.left_indexes;
+    delete[] tree.right_indexes;
+    delete[] tree.post_order_indexes;
+
+    // Data arrays
+    delete[] tree.data;
+    delete[] tree.red;
+    delete[] tree.green;
+    delete[] tree.blue;
+    delete[] tree.diffuse_coeff;
+    delete[] tree.specular_coeff;
+    delete[] tree.shininess;
 }
+
 size_t computeMaxDepth(const FlatCSGTree& tree, size_t node_idx) {
     if (tree.nodes[node_idx].shape_type != ShapeType::TreeNode) return 1;
     size_t left = computeMaxDepth(tree, tree.left_indexes[node_idx]);
@@ -570,8 +582,7 @@ size_t computeMaxDepth(const FlatCSGTree& tree, size_t node_idx) {
     return 1 + ((left > right) ? left : right);
 }
 
-// Optimized: Simulates the stack operations to find the "High Water Mark" of memory usage.
-// This allows reusing memory from processed children, drastically reducing footprint.
+// Simulates the stack operations to find High Water Mark of memory usage.
 size_t computeTotalSpanUsage(const FlatCSGTree& tree) {
     if (tree.num_nodes == 0) return 0;
 
@@ -579,8 +590,7 @@ size_t computeTotalSpanUsage(const FlatCSGTree& tree) {
     std::vector<size_t> stack_counts; // Tracks the size of items on the simulated stack
 
     // We track the 'current' pointer of the memory pool.
-    // Unlike the runtime pointer which moves back and forth, we need to track 
-    // the max necessary capacity relative to the base.
+    // We need to track  the max necessary capacity relative to the base.
     size_t pool_ptr = 0;
     size_t max_pool_ptr = 0;
 
@@ -588,9 +598,7 @@ size_t computeTotalSpanUsage(const FlatCSGTree& tree) {
         size_t idx = tree.post_order_indexes[i];
 
         if (tree.nodes[idx].shape_type != ShapeType::TreeNode) {
-            // --- LEAF NODE ---
-            // Simulates: processLeafNode -> pushes 1 span (usually)
-            // In a robust system, this might be MAX_EXPECTED_LEAF_SPANS (e.g., 2 or 4)
+            // LeafNode -> 1 span
             size_t leaf_count = 1;
 
             // Record where this leaf lives in the pool
@@ -601,7 +609,7 @@ size_t computeTotalSpanUsage(const FlatCSGTree& tree) {
             pool_ptr += leaf_count;
         }
         else {
-            // --- OPERATOR NODE ---
+            // Operator Node
             if (stack_counts.size() < 2) return 0; // Error safety
 
             size_t right_count = stack_counts.back();
@@ -616,14 +624,14 @@ size_t computeTotalSpanUsage(const FlatCSGTree& tree) {
             // Worst case result size is Sum of Inputs (standard for CSG)
             size_t result_count = left_count + right_count;
 
-            // CRITICAL: At runtime, we hold Left + Right, and generate Result at the end.
+            // At runtime, we hold Left + Right, and generate Result at the end.
             // So Peak Usage = (Start of Right + Count of Right) + Result Count
             size_t current_peak = pool_ptr + result_count;
             if (current_peak > max_pool_ptr) {
                 max_pool_ptr = current_peak;
             }
 
-            // After operation, we "Copy Back" result to where Left started.
+            // After operation, we Copy Back result to where Left started.
             // The memory used by Left and Right is effectively reclaimed.
             // New state: Stack has Result at 'left_start'
             pool_ptr = left_start + result_count;

@@ -13,13 +13,11 @@
 // --- CONSTANTS ---
 constexpr int WIDTH = 800;
 constexpr int HEIGHT = 600;
-constexpr float ROTATION_SPEED = 0.1f;
+constexpr float ROTATION_SPEED = 1.0f;  // Radians per second
 constexpr size_t MAX_SCRATCH_MEMORY_BYTES = 512ULL * 1024ULL * 1024ULL;
-
 constexpr int threadsPerBlock = 256;
 
 void cpuRender(Color* h_image, const Camera& cam, const Light& light, const FlatCSGTree& tree) {
-    // --- FIX: Allocate scratch memory ONCE ---
     // We allocate enough memory for the worst-case CSG operation defined by the tree.
     // This memory persists for the entire frame render.
     std::vector<Span> pool_buffer(tree.max_pool_size);
@@ -35,7 +33,6 @@ void cpuRender(Color* h_image, const Camera& cam, const Light& light, const Flat
             float t = (y + 0.5f) / HEIGHT;
             Ray ray = cam.getRay(s, t);
 
-            // Pass the pre-allocated buffers instead of nullptr
             h_image[y * WIDTH + x] = trace(ray, light, tree, pool, stack);
         }
     }
@@ -49,21 +46,21 @@ void gpuRender(Color* h_image, Color* d_image, const Camera& cam, const Light& l
         // Topology (per Node)
         d_tree.num_nodes * (
             sizeof(FlatCSGNodeInfo) +
-            3 * sizeof(size_t)        // left, right, post_order
-            ) +
+            3 * sizeof(size_t) +       // left, right, post_order
+            sizeof(int32_t)            // primitive_idx
+        ) +
         // Data (per Primitive)
         d_tree.num_primitives * (
             MAX_SHAPE_DATA_SIZE * sizeof(float) + // Shape data
             6 * sizeof(float)                     // Material props (rgb + 3 coeffs)
-            );
+        );
 
     // Align shared_size to be safe (optional but recommended)
     if (shared_size % 8 != 0) shared_size += (8 - (shared_size % 8));
 
     size_t total_pixels = static_cast<size_t>(WIDTH) * HEIGHT;
 
-    // BATCH LOOP
-    // Instead of one giant launch, we iterate through pixels in chunks of 'batch_size'
+    // We iterate through pixels in chunks of 'batch_size'
     for (size_t offset = 0; offset < total_pixels; offset += batch_size) {
 
         // Calculate the actual size of the current batch (last batch might be smaller)
@@ -77,7 +74,7 @@ void gpuRender(Color* h_image, Color* d_image, const Camera& cam, const Light& l
             d_image, cam, light, d_tree,
             d_global_pool, d_global_stack,
             offset, current_batch_count, total_pixels
-            );
+        );
 
         checkCudaError(cudaGetLastError(), "renderKernel launch");
     }
@@ -90,20 +87,20 @@ void compactTreeMemory(FlatCSGTree& tree) {
     size_t num_nodes = tree.num_nodes;
     size_t prim_count = 0;
 
-    // 1. Calculate Primitive Count and Assign Indices
+    // Calculate Primitive Count and Assign Indices
     for (size_t i = 0; i < num_nodes; ++i) {
         if (tree.nodes[i].shape_type != ShapeType::TreeNode) {
-            tree.nodes[i].primitive_idx = (int32_t)prim_count++;
+            tree.primitive_idx[i] = (int32_t)prim_count++;
         }
         else {
-            tree.nodes[i].primitive_idx = -1;
+            tree.primitive_idx[i] = -1;
         }
     }
     tree.num_primitives = prim_count;
 
     std::cout << "Compacting Tree: " << num_nodes << " nodes -> " << prim_count << " primitives." << std::endl;
 
-    // 2. Allocate New Compact Buffers
+    // Allocate New Compact Buffers
     float* new_data = new float[prim_count * MAX_SHAPE_DATA_SIZE];
     float* new_red = new float[prim_count];
     float* new_green = new float[prim_count];
@@ -112,9 +109,9 @@ void compactTreeMemory(FlatCSGTree& tree) {
     float* new_spec = new float[prim_count];
     float* new_shin = new float[prim_count];
 
-    // 3. Move Data
+    // Move Data
     for (size_t i = 0; i < num_nodes; ++i) {
-        int32_t p_idx = tree.nodes[i].primitive_idx;
+        int32_t p_idx = tree.primitive_idx[i];
         if (p_idx != -1) {
             // Copy Shape Data
             std::memcpy(&new_data[p_idx * MAX_SHAPE_DATA_SIZE],
@@ -131,7 +128,7 @@ void compactTreeMemory(FlatCSGTree& tree) {
         }
     }
 
-    // 4. Swap and Delete Old Buffers
+    // Swap and Delete Old Buffers
     delete[] tree.data; tree.data = new_data;
     delete[] tree.red; tree.red = new_red;
     delete[] tree.green; tree.green = new_green;
@@ -171,7 +168,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // CRITICAL: Check for empty tree to prevent Division By Zero later
+    // Check for empty tree to prevent Division By Zero later
     if (h_tree.num_nodes == 0) {
         std::cerr << "[Error] The scene file is empty or contains no valid nodes." << std::endl;
         return 1;
@@ -237,28 +234,35 @@ int main(int argc, char** argv) {
     Camera cam(initial_origin, lookat, up, fov, WIDTH, HEIGHT);
 
     bool running = true;
-    int frame = 0;
+    auto last_time = std::chrono::high_resolution_clock::now();
     while (running) {
-        auto start = std::chrono::high_resolution_clock::now();
+        auto current_time = std::chrono::high_resolution_clock::now();
+        float dt = std::chrono::duration<float>(current_time - last_time).count();  // delta time in seconds
+        last_time = current_time;
+
+        // Poll Events (Only handling Quit here)
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) running = false;
-            if (event.type == SDL_KEYDOWN) {
-                // CAMERA CONTROLS (Arrows)
-                // Left/Right now rotate the camera around the object
-                if (event.key.keysym.sym == SDLK_LEFT)  cam.rotateHorizontal(ROTATION_SPEED);  // +Angle = CCW (Left)
-                if (event.key.keysym.sym == SDLK_RIGHT) cam.rotateHorizontal(-ROTATION_SPEED); // -Angle = CW (Right)
-                if (event.key.keysym.sym == SDLK_UP)    cam.rotateVertical(ROTATION_SPEED);    // +Angle = Up
-                if (event.key.keysym.sym == SDLK_DOWN)  cam.rotateVertical(-ROTATION_SPEED);   // -Angle = Down
-
-                // LIGHT CONTROLS (WSAD)
-                // A/D for Azimuth (Horizontal), W/S for Elevation (Vertical)
-                if (event.key.keysym.sym == SDLK_a) light.rotateHorizontal(ROTATION_SPEED);  // Move Light Left
-                if (event.key.keysym.sym == SDLK_d) light.rotateHorizontal(-ROTATION_SPEED); // Move Light Right
-                if (event.key.keysym.sym == SDLK_w) light.rotateVertical(ROTATION_SPEED);    // Move Light Up
-                if (event.key.keysym.sym == SDLK_s) light.rotateVertical(-ROTATION_SPEED);   // Move Light Down
-            }
         }
+
+        // Continuous Input Handling
+        const Uint8* state = SDL_GetKeyboardState(nullptr);
+
+        // Calculate how much to rotate this specific frame
+        float frame_rotation = ROTATION_SPEED * dt;
+
+        // CAMERA CONTROLS
+        if (state[SDL_SCANCODE_LEFT])  cam.rotateHorizontal(-frame_rotation);
+        if (state[SDL_SCANCODE_RIGHT]) cam.rotateHorizontal(frame_rotation);
+        if (state[SDL_SCANCODE_UP])    cam.rotateVertical(frame_rotation);
+        if (state[SDL_SCANCODE_DOWN])  cam.rotateVertical(-frame_rotation);
+
+        // LIGHT CONTROLS
+        if (state[SDL_SCANCODE_A]) light.rotateHorizontal(frame_rotation);
+        if (state[SDL_SCANCODE_D]) light.rotateHorizontal(-frame_rotation);
+        if (state[SDL_SCANCODE_W]) light.rotateVertical(frame_rotation);
+        if (state[SDL_SCANCODE_S]) light.rotateVertical(-frame_rotation);
 
         if (use_gpu) {
             gpuRender(h_image, d_image, cam, light, d_tree, d_global_pool, d_global_stack, batch_size);
@@ -268,10 +272,8 @@ int main(int argc, char** argv) {
         }
         updateSurface(surface, h_image);
         SDL_UpdateWindowSurface(window);
-        auto end = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-        ++frame;
-        std::cout << "Frame " << frame << ": " << duration << " ms" << std::endl;
+        
+        std::cout << "Frame Time: " << (dt * 1000.0f) << " ms (" << (1.0f / dt) << " FPS)" << std::endl;    
     }
 
     SDL_DestroyWindow(window);

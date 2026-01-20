@@ -58,8 +58,8 @@ static size_t parseSubtree(std::istream& in,
 
     if (type == "sphere") {
         nodes[this_index].shape_type = ShapeType::Sphere;
-        // op is irrelevant for leaves
-
+        
+        // Expected: x y z rad r g b dc sc sh
         float x, y, z, rad, cr, cg, cb, dc, sc, sh;
         if (!(ss >> x >> y >> z >> rad >> cr >> cg >> cb >> dc >> sc >> sh)) {
             throw std::runtime_error("Parse error in sphere data");
@@ -213,6 +213,8 @@ FlatCSGTree loadFromFile(const char* filename) {
 
     tree.right_indexes = new size_t[num_nodes];
     std::memcpy(tree.right_indexes, rights.data(), num_nodes * sizeof(size_t));
+
+    tree.primitive_idx = new int32_t[num_nodes];
 
     // Compute post-order traversal
     std::vector<size_t> post_order;
