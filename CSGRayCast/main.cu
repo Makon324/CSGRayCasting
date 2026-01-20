@@ -245,16 +245,18 @@ int main(int argc, char** argv) {
             if (event.type == SDL_QUIT) running = false;
             if (event.type == SDL_KEYDOWN) {
                 // CAMERA CONTROLS (Arrows)
-                if (event.key.keysym.sym == SDLK_LEFT) cam.rotateHorizontal(ROTATION_SPEED);
-                if (event.key.keysym.sym == SDLK_RIGHT) cam.rotateHorizontal(-ROTATION_SPEED);
-                if (event.key.keysym.sym == SDLK_UP) cam.rotateVertical(ROTATION_SPEED);
-                if (event.key.keysym.sym == SDLK_DOWN) cam.rotateVertical(-ROTATION_SPEED);
+                // Left/Right now rotate the camera around the object
+                if (event.key.keysym.sym == SDLK_LEFT)  cam.rotateHorizontal(ROTATION_SPEED);  // +Angle = CCW (Left)
+                if (event.key.keysym.sym == SDLK_RIGHT) cam.rotateHorizontal(-ROTATION_SPEED); // -Angle = CW (Right)
+                if (event.key.keysym.sym == SDLK_UP)    cam.rotateVertical(ROTATION_SPEED);    // +Angle = Up
+                if (event.key.keysym.sym == SDLK_DOWN)  cam.rotateVertical(-ROTATION_SPEED);   // -Angle = Down
 
                 // LIGHT CONTROLS (WSAD)
-                if (event.key.keysym.sym == SDLK_a) light.rotateHorizontal(ROTATION_SPEED);
-                if (event.key.keysym.sym == SDLK_d) light.rotateVertical(-ROTATION_SPEED);
-                if (event.key.keysym.sym == SDLK_w) light.rotateHorizontal(ROTATION_SPEED);
-                if (event.key.keysym.sym == SDLK_s) light.rotateVertical(-ROTATION_SPEED);
+                // A/D for Azimuth (Horizontal), W/S for Elevation (Vertical)
+                if (event.key.keysym.sym == SDLK_a) light.rotateHorizontal(ROTATION_SPEED);  // Move Light Left
+                if (event.key.keysym.sym == SDLK_d) light.rotateHorizontal(-ROTATION_SPEED); // Move Light Right
+                if (event.key.keysym.sym == SDLK_w) light.rotateVertical(ROTATION_SPEED);    // Move Light Up
+                if (event.key.keysym.sym == SDLK_s) light.rotateVertical(-ROTATION_SPEED);   // Move Light Down
             }
         }
 

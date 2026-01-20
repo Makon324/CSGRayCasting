@@ -85,14 +85,15 @@ struct Camera {
 
     __host__ __device__ void rotateHorizontal(float delta_angle) {
         Vec3 dir = origin - lookat;
-        // Calculate horizontal radius (XZ plane)
         float r_xz = sqrtf(dir.x * dir.x + dir.z * dir.z);
 
-        float current_angle = atan2(dir.x, dir.z);
+        // FIX: Use atan2(z, x) for standard angle
+        float current_angle = atan2(dir.z, dir.x);
         float new_angle = current_angle + delta_angle;
 
-        origin.x = lookat.x + r_xz * sinf(new_angle);
-        origin.z = lookat.z + r_xz * cosf(new_angle);
+        // FIX: Standard Polar Coordinates (x = cos, z = sin)
+        origin.x = lookat.x + r_xz * cosf(new_angle);
+        origin.z = lookat.z + r_xz * sinf(new_angle);
 
         updateBasis();
     }
@@ -101,26 +102,21 @@ struct Camera {
         Vec3 dir = origin - lookat;
         float r = dir.length();
 
-        // Calculate current pitch (elevation angle)
-        // sin(pitch) = y / r
         float current_pitch = asinf(dir.y / r);
         float new_pitch = current_pitch + delta_angle;
 
-        // Clamp to avoid flipping over the top (approx +/- 89 degrees)
+        // Clamp pitch
         const float LIMIT = 89.0f * (static_cast<float>(M_PI) / 180.0f);
         if (new_pitch > LIMIT) new_pitch = LIMIT;
         if (new_pitch < -LIMIT) new_pitch = -LIMIT;
 
-        // Calculate new Y height
         origin.y = lookat.y + r * sinf(new_pitch);
-
-        // Calculate new horizontal radius based on pitch
         float r_xz = r * cosf(new_pitch);
 
-        // Preserve current azimuth (horizontal angle)
-        float theta = atan2(dir.x, dir.z);
-        origin.x = lookat.x + r_xz * sinf(theta);
-        origin.z = lookat.z + r_xz * cosf(theta);
+        // FIX: Must match the Horizontal logic (atan2(z, x) and cos/sin)
+        float theta = atan2(dir.z, dir.x);
+        origin.x = lookat.x + r_xz * cosf(theta);
+        origin.z = lookat.z + r_xz * sinf(theta);
 
         updateBasis();
     }
@@ -133,45 +129,38 @@ struct Light {
     Vec3 direction;
     __host__ __device__ Light(const Vec3& dir) : direction(dir.normalize()) {}
 
-    __host__ __device__ void rotateHorizontal(float angle) {
-        float s = sinf(angle);
-        float c = cosf(angle);
-        // Standard rotation matrix around Y axis
-        float new_x = direction.x * c + direction.z * s;
-        float new_z = -direction.x * s + direction.z * c;
+    __host__ __device__ void rotateHorizontal(float delta_angle) {
+        // Convert to Polar, rotate, convert back
+        // This is more robust than the manual rotation matrix in the original code
+        float r_xz = sqrtf(direction.x * direction.x + direction.z * direction.z);
 
-        direction.x = new_x;
-        direction.z = new_z;
-        // Re-normalize to ensure consistent lighting intensity
+        // FIX: Standard atan2(z, x)
+        float current_angle = atan2(direction.z, direction.x);
+        float new_angle = current_angle + delta_angle;
+
+        direction.x = r_xz * cosf(new_angle);
+        direction.z = r_xz * sinf(new_angle);
+
         direction = direction.normalize();
     }
 
     __host__ __device__ void rotateVertical(float delta_angle) {
-        // The length of a direction vector should be 1.0
         float r = direction.length();
-
-        // Calculate current pitch (elevation angle)
-        // asin returns values in range [-PI/2, PI/2]
         float current_pitch = asinf(direction.y / r);
         float new_pitch = current_pitch + delta_angle;
 
-        // Clamp to avoid the gimbal lock/flipping at the poles (+/- 90 degrees)
         const float LIMIT = 89.0f * (static_cast<float>(M_PI) / 180.0f);
         if (new_pitch > LIMIT) new_pitch = LIMIT;
         if (new_pitch < -LIMIT) new_pitch = -LIMIT;
 
-        // Calculate new Y component
         direction.y = r * sinf(new_pitch);
-
-        // Calculate the new projection on the XZ plane
         float r_xz = r * cosf(new_pitch);
 
-        // Preserve current azimuth (horizontal angle)
-        float theta = atan2f(direction.x, direction.z);
-        direction.x = r_xz * sinf(theta);
-        direction.z = r_xz * cosf(theta);
+        // FIX: Match standard math
+        float theta = atan2f(direction.z, direction.x);
+        direction.x = r_xz * cosf(theta);
+        direction.z = r_xz * sinf(theta);
 
-        // Final normalization to account for any floating point drift
         direction = direction.normalize();
     }
 };
