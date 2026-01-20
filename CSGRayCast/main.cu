@@ -12,7 +12,7 @@
 // --- CONSTANTS ---
 constexpr int WIDTH = 800;
 constexpr int HEIGHT = 600;
-constexpr float LIGHT_ROTATION_SPEED = 0.02f;
+constexpr float ROTATION_SPEED = 0.1f;
 constexpr size_t MAX_SCRATCH_MEMORY_BYTES = 512ULL * 1024ULL * 1024ULL;
 
 constexpr int threadsPerBlock = 256;
@@ -231,14 +231,19 @@ int main(int argc, char** argv) {
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) running = false;
             if (event.type == SDL_KEYDOWN) {
-                if (event.key.keysym.sym == SDLK_LEFT) cam.rotateY(0.1f);
-                if (event.key.keysym.sym == SDLK_RIGHT) cam.rotateY(-0.1f);
-                if (event.key.keysym.sym == SDLK_UP) cam.rotateVertical(0.1f);
-                if (event.key.keysym.sym == SDLK_DOWN) cam.rotateVertical(-0.1f);
+                // CAMERA CONTROLS (Arrows)
+                if (event.key.keysym.sym == SDLK_LEFT) cam.rotateHorizontal(ROTATION_SPEED);
+                if (event.key.keysym.sym == SDLK_RIGHT) cam.rotateHorizontal(-ROTATION_SPEED);
+                if (event.key.keysym.sym == SDLK_UP) cam.rotateVertical(ROTATION_SPEED);
+                if (event.key.keysym.sym == SDLK_DOWN) cam.rotateVertical(-ROTATION_SPEED);
+
+                // LIGHT CONTROLS (WSAD)
+                if (event.key.keysym.sym == SDLK_a) light.rotateHorizontal(ROTATION_SPEED);
+                if (event.key.keysym.sym == SDLK_d) light.rotateVertical(-ROTATION_SPEED);
+                if (event.key.keysym.sym == SDLK_w) light.rotateHorizontal(ROTATION_SPEED);
+                if (event.key.keysym.sym == SDLK_s) light.rotateVertical(-ROTATION_SPEED);
             }
         }
-
-        light.rotateY(LIGHT_ROTATION_SPEED);
 
         if (use_gpu) {
             gpuRender(h_image, d_image, cam, light, d_tree, d_global_pool, d_global_stack, batch_size);

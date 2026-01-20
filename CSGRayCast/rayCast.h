@@ -83,7 +83,7 @@ struct Camera {
         v = w.cross(u);
     }
 
-    __host__ __device__ void rotateY(float delta_angle) {
+    __host__ __device__ void rotateHorizontal(float delta_angle) {
         Vec3 dir = origin - lookat;
         // Calculate horizontal radius (XZ plane)
         float r_xz = sqrtf(dir.x * dir.x + dir.z * dir.z);
@@ -133,7 +133,7 @@ struct Light {
     Vec3 direction;
     __host__ __device__ Light(const Vec3& dir) : direction(dir.normalize()) {}
 
-    __host__ __device__ void rotateY(float angle) {
+    __host__ __device__ void rotateHorizontal(float angle) {
         float s = sinf(angle);
         float c = cosf(angle);
         // Standard rotation matrix around Y axis
@@ -143,6 +143,35 @@ struct Light {
         direction.x = new_x;
         direction.z = new_z;
         // Re-normalize to ensure consistent lighting intensity
+        direction = direction.normalize();
+    }
+
+    __host__ __device__ void rotateVertical(float delta_angle) {
+        // The length of a direction vector should be 1.0
+        float r = direction.length();
+
+        // Calculate current pitch (elevation angle)
+        // asin returns values in range [-PI/2, PI/2]
+        float current_pitch = asinf(direction.y / r);
+        float new_pitch = current_pitch + delta_angle;
+
+        // Clamp to avoid the gimbal lock/flipping at the poles (+/- 90 degrees)
+        const float LIMIT = 89.0f * (static_cast<float>(M_PI) / 180.0f);
+        if (new_pitch > LIMIT) new_pitch = LIMIT;
+        if (new_pitch < -LIMIT) new_pitch = -LIMIT;
+
+        // Calculate new Y component
+        direction.y = r * sinf(new_pitch);
+
+        // Calculate the new projection on the XZ plane
+        float r_xz = r * cosf(new_pitch);
+
+        // Preserve current azimuth (horizontal angle)
+        float theta = atan2f(direction.x, direction.z);
+        direction.x = r_xz * sinf(theta);
+        direction.z = r_xz * cosf(theta);
+
+        // Final normalization to account for any floating point drift
         direction = direction.normalize();
     }
 };
