@@ -31,19 +31,19 @@ struct FlatCSGTree {
     float* shininess;
 
     // Topology data
-    size_t* left_indexes;
-    size_t* right_indexes;
-    size_t* post_order_indexes;
+    uint32_t* left_indexes;
+    uint32_t* right_indexes;
+    uint32_t* post_order_indexes;
 
-    size_t max_pool_size;
-    size_t max_stack_depth;
+    uint32_t max_pool_size;
+    uint32_t max_stack_depth;
 };
 
 FlatCSGTree loadFromFile(const char* filename);
 
-size_t computeMaxDepth(const FlatCSGTree& tree, size_t node_idx = 0);
+uint32_t computeMaxDepth(const FlatCSGTree& tree, uint32_t node_idx = 0);
 
-size_t computeTotalSpanUsage(const FlatCSGTree& tree);
+uint32_t computeTotalSpanUsage(const FlatCSGTree& tree);
 
 
 

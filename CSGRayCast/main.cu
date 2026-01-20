@@ -46,8 +46,8 @@ void gpuRender(Color* h_image, Color* d_image, const Camera& cam, const Light& l
         // Topology (per Node)
         d_tree.num_nodes * (
             sizeof(FlatCSGNodeInfo) +
-            3 * sizeof(size_t) +       // left, right, post_order
-            sizeof(int32_t)            // primitive_idx
+            3 * sizeof(uint32_t) +       // left, right, post_order
+            sizeof(int32_t)              // primitive_idx
         ) +
         // Data (per Primitive)
         d_tree.num_primitives * (

@@ -9,7 +9,7 @@
 #include <algorithm>
 #include <cstring>
 
-static size_t parseSubtree(std::istream& in,
+static uint32_t parseSubtree(std::istream& in,
     std::vector<FlatCSGNodeInfo>& nodes,
     std::vector<float>& shape_data,
     std::vector<float>& reds,
@@ -18,15 +18,15 @@ static size_t parseSubtree(std::istream& in,
     std::vector<float>& diffs,
     std::vector<float>& specs,
     std::vector<float>& shins,
-    std::vector<size_t>& lefts,
-    std::vector<size_t>& rights) {
+    std::vector<uint32_t>& lefts,
+    std::vector<uint32_t>& rights) {
     std::string line;
     if (!std::getline(in, line)) {
         throw std::runtime_error("Unexpected end of file");
     }
 
     // Trim leading spaces and count indent
-    size_t indent = 0;
+    uint32_t indent = 0;
     while (indent < line.size() && line[indent] == ' ') {
         ++indent;
     }
@@ -40,7 +40,7 @@ static size_t parseSubtree(std::istream& in,
     std::string type;
     ss >> type;
 
-    size_t this_index = nodes.size();
+    uint32_t this_index = (uint32_t)nodes.size();
     nodes.emplace_back();
     shape_data.resize(nodes.size() * MAX_SHAPE_DATA_SIZE);
     reds.resize(nodes.size());
@@ -54,7 +54,7 @@ static size_t parseSubtree(std::istream& in,
 
     std::vector<float> this_data(MAX_SHAPE_DATA_SIZE, 0.0f);
     float r = 0.0f, g = 0.0f, b = 0.0f, diff = 1.0f, spec = 0.0f, shin = 0.0f;
-    size_t left = 0, right = 0;  // 0 indicates no child
+    uint32_t left = 0, right = 0;  // 0 indicates no child
 
     if (type == "sphere") {
         nodes[this_index].shape_type = ShapeType::Sphere;
@@ -140,7 +140,7 @@ static size_t parseSubtree(std::istream& in,
         right = parseSubtree(in, nodes, shape_data, reds, greens, blues, diffs, specs, shins, lefts, rights);
     }
 
-    for (size_t i = 0; i < MAX_SHAPE_DATA_SIZE; ++i) {
+    for (uint32_t i = 0; i < MAX_SHAPE_DATA_SIZE; ++i) {
         shape_data[this_index * MAX_SHAPE_DATA_SIZE + i] = this_data[i];
     }
     reds[this_index] = r;
@@ -155,7 +155,7 @@ static size_t parseSubtree(std::istream& in,
     return this_index;
 }
 
-void buildPostOrder(const FlatCSGTree& tree, size_t idx, std::vector<size_t>& post_order) {
+void buildPostOrder(const FlatCSGTree& tree, uint32_t idx, std::vector<uint32_t>& post_order) {
     if (tree.nodes[idx].shape_type == ShapeType::TreeNode) {
         buildPostOrder(tree, tree.left_indexes[idx], post_order);
         buildPostOrder(tree, tree.right_indexes[idx], post_order);
@@ -172,7 +172,7 @@ FlatCSGTree loadFromFile(const char* filename) {
     std::vector<FlatCSGNodeInfo> nodes;
     std::vector<float> shape_data;
     std::vector<float> reds, greens, blues, diffs, specs, shins;
-    std::vector<size_t> lefts, rights;
+    std::vector<uint32_t> lefts, rights;
 
     parseSubtree(in, nodes, shape_data, reds, greens, blues, diffs, specs, shins, lefts, rights);
 
@@ -208,19 +208,19 @@ FlatCSGTree loadFromFile(const char* filename) {
     tree.shininess = new float[num_nodes];
     std::memcpy(tree.shininess, shins.data(), num_nodes * sizeof(float));
 
-    tree.left_indexes = new size_t[num_nodes];
-    std::memcpy(tree.left_indexes, lefts.data(), num_nodes * sizeof(size_t));
+    tree.left_indexes = new uint32_t[num_nodes];
+    std::memcpy(tree.left_indexes, lefts.data(), num_nodes * sizeof(uint32_t));
 
-    tree.right_indexes = new size_t[num_nodes];
-    std::memcpy(tree.right_indexes, rights.data(), num_nodes * sizeof(size_t));
+    tree.right_indexes = new uint32_t[num_nodes];
+    std::memcpy(tree.right_indexes, rights.data(), num_nodes * sizeof(uint32_t));
 
     tree.primitive_idx = new int32_t[num_nodes];
 
     // Compute post-order traversal
-    std::vector<size_t> post_order;
+    std::vector<uint32_t> post_order;
     buildPostOrder(tree, 0, post_order);
-    tree.post_order_indexes = new size_t[num_nodes];
-    std::memcpy(tree.post_order_indexes, post_order.data(), num_nodes * sizeof(size_t));
+    tree.post_order_indexes = new uint32_t[num_nodes];
+    std::memcpy(tree.post_order_indexes, post_order.data(), num_nodes * sizeof(uint32_t));
 
     return tree;
 }

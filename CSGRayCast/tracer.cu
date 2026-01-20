@@ -18,11 +18,11 @@ template <typename T>
 __host__ __device__ void processLeafNode(
     const Ray& ray,
     const FlatCSGTree& tree,
-    size_t node_idx, // The topology index
+    uint32_t node_idx, // The topology index
     StridedSpan& pool,
-    int& pool_ptr,
+    uint32_t& pool_ptr,
     StridedStack& stack,
-    int& sp,
+    uint32_t& sp,
     uint32_t& count
 ) {
     if (pool_ptr + 1 > tree.max_pool_size) { count = 0; return; }
@@ -34,7 +34,7 @@ __host__ __device__ void processLeafNode(
 
     // Read from the compact array using prim_idx
 #pragma unroll
-    for (int j = 0; j < MAX_SHAPE_DATA_SIZE; ++j) {
+    for (uint32_t j = 0; j < MAX_SHAPE_DATA_SIZE; ++j) {
         data[j] = tree.data[prim_idx * MAX_SHAPE_DATA_SIZE + j];
     }
 
@@ -42,7 +42,7 @@ __host__ __device__ void processLeafNode(
 
     shape.node_id = prim_idx;
 
-    int start = pool_ptr;
+    uint32_t start = pool_ptr;
     uint32_t my_count = 0;
     shape.getSpans(ray, pool.at(pool_ptr), my_count);
     pool_ptr += my_count;
@@ -253,8 +253,8 @@ __host__ __device__ void getSpans(const Ray& ray, size_t* out_start_idx, uint32_
     StridedSpan pool = thread_pool;
     StridedStack stack = thread_stack;
 
-    int pool_ptr = 0;
-    int sp = 0;
+    uint32_t pool_ptr = 0;
+    uint32_t sp = 0;
 
     // CPU Fallback handling
 #ifndef __CUDA_ARCH__
@@ -270,8 +270,8 @@ __host__ __device__ void getSpans(const Ray& ray, size_t* out_start_idx, uint32_
 
     uint32_t current_op_count = 0;
 
-    for (size_t i = 0; i < tree.num_nodes; ++i) {
-        size_t idx = tree.post_order_indexes[i];
+    for (uint32_t i = 0; i < tree.num_nodes; ++i) {
+        uint32_t idx = tree.post_order_indexes[i];
         ShapeType type = tree.nodes[idx].shape_type;
 
         if (type == ShapeType::Sphere) processLeafNode<Sphere>(ray, tree, idx, pool, pool_ptr, stack, sp, current_op_count);
@@ -395,17 +395,17 @@ __global__ void renderKernel(Color* image, const Camera cam, const Light light, 
     shared_tree.nodes = (FlatCSGNodeInfo*)ptr;
     ptr += shared_tree.num_nodes * sizeof(FlatCSGNodeInfo);
 
-    shared_tree.left_indexes = (size_t*)ptr;
-    ptr += shared_tree.num_nodes * sizeof(size_t);
+    shared_tree.left_indexes = (uint32_t*)ptr;
+    ptr += shared_tree.num_nodes * sizeof(uint32_t);
 
-    shared_tree.right_indexes = (size_t*)ptr;
-    ptr += shared_tree.num_nodes * sizeof(size_t);
+    shared_tree.right_indexes = (uint32_t*)ptr;
+    ptr += shared_tree.num_nodes * sizeof(uint32_t);
 
     shared_tree.primitive_idx = (int32_t*)ptr;
     ptr += shared_tree.num_nodes * sizeof(int32_t);
 
-    shared_tree.post_order_indexes = (size_t*)ptr;
-    ptr += shared_tree.num_nodes * sizeof(size_t);
+    shared_tree.post_order_indexes = (uint32_t*)ptr;
+    ptr += shared_tree.num_nodes * sizeof(uint32_t);
 
 
     // DATA POINTERS (Size = num_primitives)
@@ -497,14 +497,14 @@ void copyTreeToDevice(const FlatCSGTree& h_tree, FlatCSGTree& d_tree) {
     checkCudaError(cudaMalloc(&d_tree.nodes, h_tree.num_nodes * sizeof(FlatCSGNodeInfo)), "alloc nodes");
     checkCudaError(cudaMemcpy(d_tree.nodes, h_tree.nodes, h_tree.num_nodes * sizeof(FlatCSGNodeInfo), cudaMemcpyHostToDevice), "copy nodes");
 
-    checkCudaError(cudaMalloc(&d_tree.left_indexes, h_tree.num_nodes * sizeof(size_t)), "alloc left");
-    checkCudaError(cudaMemcpy(d_tree.left_indexes, h_tree.left_indexes, h_tree.num_nodes * sizeof(size_t), cudaMemcpyHostToDevice), "copy left");
+    checkCudaError(cudaMalloc(&d_tree.left_indexes, h_tree.num_nodes * sizeof(uint32_t)), "alloc left");
+    checkCudaError(cudaMemcpy(d_tree.left_indexes, h_tree.left_indexes, h_tree.num_nodes * sizeof(uint32_t), cudaMemcpyHostToDevice), "copy left");
 
-    checkCudaError(cudaMalloc(&d_tree.right_indexes, h_tree.num_nodes * sizeof(size_t)), "alloc right");
-    checkCudaError(cudaMemcpy(d_tree.right_indexes, h_tree.right_indexes, h_tree.num_nodes * sizeof(size_t), cudaMemcpyHostToDevice), "copy right");
+    checkCudaError(cudaMalloc(&d_tree.right_indexes, h_tree.num_nodes * sizeof(uint32_t)), "alloc right");
+    checkCudaError(cudaMemcpy(d_tree.right_indexes, h_tree.right_indexes, h_tree.num_nodes * sizeof(uint32_t), cudaMemcpyHostToDevice), "copy right");
 
-    checkCudaError(cudaMalloc(&d_tree.post_order_indexes, h_tree.num_nodes * sizeof(size_t)), "alloc post");
-    checkCudaError(cudaMemcpy(d_tree.post_order_indexes, h_tree.post_order_indexes, h_tree.num_nodes * sizeof(size_t), cudaMemcpyHostToDevice), "copy post");
+    checkCudaError(cudaMalloc(&d_tree.post_order_indexes, h_tree.num_nodes * sizeof(uint32_t)), "alloc post");
+    checkCudaError(cudaMemcpy(d_tree.post_order_indexes, h_tree.post_order_indexes, h_tree.num_nodes * sizeof(uint32_t), cudaMemcpyHostToDevice), "copy post");
 
     checkCudaError(cudaMalloc(&d_tree.primitive_idx, h_tree.num_nodes * sizeof(int32_t)), "alloc prim_idx");
     checkCudaError(cudaMemcpy(d_tree.primitive_idx, h_tree.primitive_idx, h_tree.num_nodes * sizeof(int32_t), cudaMemcpyHostToDevice), "copy prim_idx");
@@ -575,31 +575,31 @@ void freeHostTree(FlatCSGTree& tree) {
     delete[] tree.shininess;
 }
 
-size_t computeMaxDepth(const FlatCSGTree& tree, size_t node_idx) {
+uint32_t computeMaxDepth(const FlatCSGTree& tree, uint32_t node_idx) {
     if (tree.nodes[node_idx].shape_type != ShapeType::TreeNode) return 1;
-    size_t left = computeMaxDepth(tree, tree.left_indexes[node_idx]);
-    size_t right = computeMaxDepth(tree, tree.right_indexes[node_idx]);
+    uint32_t left = computeMaxDepth(tree, tree.left_indexes[node_idx]);
+    uint32_t right = computeMaxDepth(tree, tree.right_indexes[node_idx]);
     return 1 + ((left > right) ? left : right);
 }
 
 // Simulates the stack operations to find High Water Mark of memory usage.
-size_t computeTotalSpanUsage(const FlatCSGTree& tree) {
+uint32_t computeTotalSpanUsage(const FlatCSGTree& tree) {
     if (tree.num_nodes == 0) return 0;
 
-    std::vector<size_t> stack_starts; // Tracks the start index of items on the simulated stack
-    std::vector<size_t> stack_counts; // Tracks the size of items on the simulated stack
+    std::vector<uint32_t> stack_starts; // Tracks the start index of items on the simulated stack
+    std::vector<uint32_t> stack_counts; // Tracks the size of items on the simulated stack
 
     // We track the 'current' pointer of the memory pool.
     // We need to track  the max necessary capacity relative to the base.
-    size_t pool_ptr = 0;
-    size_t max_pool_ptr = 0;
+    uint32_t pool_ptr = 0;
+    uint32_t max_pool_ptr = 0;
 
-    for (size_t i = 0; i < tree.num_nodes; ++i) {
-        size_t idx = tree.post_order_indexes[i];
+    for (uint32_t i = 0; i < tree.num_nodes; ++i) {
+        uint32_t idx = tree.post_order_indexes[i];
 
         if (tree.nodes[idx].shape_type != ShapeType::TreeNode) {
             // LeafNode -> 1 span
-            size_t leaf_count = 1;
+            uint32_t leaf_count = 1;
 
             // Record where this leaf lives in the pool
             stack_starts.push_back(pool_ptr);
@@ -612,21 +612,21 @@ size_t computeTotalSpanUsage(const FlatCSGTree& tree) {
             // Operator Node
             if (stack_counts.size() < 2) return 0; // Error safety
 
-            size_t right_count = stack_counts.back();
+            uint32_t right_count = stack_counts.back();
             stack_counts.pop_back();
             stack_starts.pop_back();
 
-            size_t left_count = stack_counts.back();
+            uint32_t left_count = stack_counts.back();
             stack_counts.pop_back();
-            size_t left_start = stack_starts.back();
+            uint32_t left_start = stack_starts.back();
             stack_starts.pop_back();
 
             // Worst case result size is Sum of Inputs (standard for CSG)
-            size_t result_count = left_count + right_count;
+            uint32_t result_count = left_count + right_count;
 
             // At runtime, we hold Left + Right, and generate Result at the end.
             // So Peak Usage = (Start of Right + Count of Right) + Result Count
-            size_t current_peak = pool_ptr + result_count;
+            uint32_t current_peak = pool_ptr + result_count;
             if (current_peak > max_pool_ptr) {
                 max_pool_ptr = current_peak;
             }
