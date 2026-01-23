@@ -197,7 +197,7 @@ int main(int argc, char** argv) {
         checkCudaError(cudaMalloc(&d_image, WIDTH * HEIGHT * sizeof(Color)), "cudaMalloc d_image");
         copyTreeToDevice(h_tree, d_tree);
 
-        // --- SMART MEMORY ALLOCATION ---
+        // SMART MEMORY ALLOCATION
         size_t total_pixels = static_cast<size_t>(WIDTH) * HEIGHT;
 
         // Calculate memory required per pixel
@@ -253,16 +253,16 @@ int main(int argc, char** argv) {
         float frame_rotation = ROTATION_SPEED * dt;
 
         // CAMERA CONTROLS
-        if (state[SDL_SCANCODE_LEFT])  cam.rotateHorizontal(-frame_rotation);
-        if (state[SDL_SCANCODE_RIGHT]) cam.rotateHorizontal(frame_rotation);
+        if (state[SDL_SCANCODE_LEFT])  cam.rotateHorizontal(frame_rotation);
+        if (state[SDL_SCANCODE_RIGHT]) cam.rotateHorizontal(-frame_rotation);
         if (state[SDL_SCANCODE_UP])    cam.rotateVertical(frame_rotation);
         if (state[SDL_SCANCODE_DOWN])  cam.rotateVertical(-frame_rotation);
 
         // LIGHT CONTROLS
         if (state[SDL_SCANCODE_A]) light.rotateHorizontal(frame_rotation);
         if (state[SDL_SCANCODE_D]) light.rotateHorizontal(-frame_rotation);
-        if (state[SDL_SCANCODE_W]) light.rotateVertical(frame_rotation);
-        if (state[SDL_SCANCODE_S]) light.rotateVertical(-frame_rotation);
+        if (state[SDL_SCANCODE_W]) light.rotateVertical(-frame_rotation);
+        if (state[SDL_SCANCODE_S]) light.rotateVertical(frame_rotation);
 
         if (use_gpu) {
             gpuRender(h_image, d_image, cam, light, d_tree, d_global_pool, d_global_stack, batch_size);

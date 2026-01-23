@@ -63,7 +63,7 @@ struct Cuboid {
         Vec3 n_exit(0, 0, 0);
 
         // Check X slab
-        if (abs(ray.dir.x) < 1e-6f) {
+        if (fabsf(ray.dir.x) < 1e-6f) {
             if (ray.origin.x < min_pt.x || ray.origin.x > max_pt.x) return;
         }
         else {
@@ -80,7 +80,7 @@ struct Cuboid {
         }
 
         // Check Y slab
-        if (abs(ray.dir.y) < 1e-6f) {
+        if (fabsf(ray.dir.y) < 1e-6f) {
             if (ray.origin.y < min_pt.y || ray.origin.y > max_pt.y) return;
         }
         else {
@@ -97,7 +97,7 @@ struct Cuboid {
         }
 
         // Check Z slab
-        if (abs(ray.dir.z) < 1e-6f) {
+        if (fabsf(ray.dir.z) < 1e-6f) {
             if (ray.origin.z < min_pt.z || ray.origin.z > max_pt.z) return;
         }
         else {
@@ -152,7 +152,7 @@ struct Cylinder {
         int hit_count = 0;
 
         // Body intersection
-        if (abs(a) > 1e-6f) {
+        if (fabsf(a) > 1e-6f) {
             float disc = b * b - 4.0f * a * c;
             if (disc >= 0.0f) {
                 float sqrt_disc = sqrtf(disc);
@@ -175,7 +175,7 @@ struct Cylinder {
         }
 
         // Cap intersections (y=0 and y=height)
-        if (abs(rd.y) > 1e-6f) {
+        if (fabsf(rd.y) > 1e-6f) {
             // Bottom cap
             float t_bot = (0.0f - ro.y) / rd.y;
             Vec3 p_bot = ro + rd * t_bot;
@@ -246,7 +246,7 @@ struct Cone {
         int hit_count = 0;
 
         // Body intersection
-        if (abs(a) > 1e-6f) {
+        if (fabsf(a) > 1e-6f) {
             float disc = b * b - 4.0f * a * c;
             if (disc >= 0.0f) {
                 float sqrt_disc = sqrtf(disc);
@@ -271,7 +271,7 @@ struct Cone {
         }
 
         // Base Cap intersection (y=0)
-        if (abs(rd.y) > 1e-6f) {
+        if (fabsf(rd.y) > 1e-6f) {
             float t_base = (0.0f - ro.y) / rd.y;
             Vec3 p_base = ro + rd * t_base;
             if (p_base.x * p_base.x + p_base.z * p_base.z <= radius * radius) {

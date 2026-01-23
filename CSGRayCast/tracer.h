@@ -49,7 +49,6 @@ __host__ __device__ void unionSpans(const StridedSpan& left, uint32_t left_count
 __host__ __device__ void intersectionSpans(const StridedSpan& left, uint32_t left_count, const StridedSpan& right, uint32_t right_count, StridedSpan& result, uint32_t& result_count);
 __host__ __device__ void differenceSpans(const StridedSpan& left, uint32_t left_count, const StridedSpan& right, uint32_t right_count, StridedSpan& result, uint32_t& result_count);
 
-// CHANGED: getSpans now returns the start index via pointer, no local buffer copy needed
 __host__ __device__ void getSpans(const Ray& ray, size_t* out_start_idx, uint32_t* out_count, const FlatCSGTree& tree, size_t node_idx, StridedSpan thread_pool, StridedStack thread_stack);
 __host__ __device__ Color trace(const Ray& ray, const Light& light, const FlatCSGTree& tree, StridedSpan thread_pool, StridedStack thread_stack);
 

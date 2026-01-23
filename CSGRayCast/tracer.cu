@@ -18,7 +18,7 @@ template <typename T>
 __host__ __device__ void processLeafNode(
     const Ray& ray,
     const FlatCSGTree& tree,
-    uint32_t node_idx, // The topology index
+    uint32_t node_idx,  // The topology (all nodes) index
     StridedSpan& pool,
     uint32_t& pool_ptr,
     StridedStack& stack,

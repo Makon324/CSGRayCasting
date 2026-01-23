@@ -1,0 +1,3 @@
+C:/Users/maciek/CSGRayCast/CSGRayCast/build/CMakeFiles/CSGRayCast.dir
+C:/Users/maciek/CSGRayCast/CSGRayCast/build/CMakeFiles/ALL_BUILD.dir
+C:/Users/maciek/CSGRayCast/CSGRayCast/build/CMakeFiles/ZERO_CHECK.dir
