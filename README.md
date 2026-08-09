@@ -1,388 +1,139 @@
-\## Kompilacja
+# CSG Ray Casting
 
+Interaktywny ray tracer bry? CSG (Constructive Solid Geometry) dzia?aj?cy na CPU lub GPU przez CUDA. Sceny sk?adaj? si? z prymityw?w ??czonych operacjami sumy, cz??ci wsp?lnej i r??nicy, a wynik jest wy?wietlany w oknie SDL2.
 
+## Wymagania
 
-Projekt wykorzystuje system CMake oraz działa na systemie Windows. W terminalu należy wykonać:
+- Windows 10 lub 11
+- CMake 3.18 lub nowszy
+- Visual Studio 2022 z narz?dziami C++
+- NVIDIA CUDA Toolkit
+- karta NVIDIA obs?uguj?ca CUDA ? tylko dla trybu `gpu`
 
+CMake najpierw szuka zainstalowanego SDL2. Je?li go nie znajdzie, pobiera przypi?t? wersj? SDL 2.32.10 podczas pierwszej konfiguracji.
 
+## Kompilacja
 
-```bash
+Z katalogu g??wnego repozytorium uruchom:
 
-cmake -S . -B build
-
-cmake --build . --config Release
-
+```powershell
+cmake -S CSGRayCast -B build
+cmake --build build --config Release
 ```
 
+Dla generatora Visual Studio plik wykonywalny zostanie utworzony jako `build\Release\CSGRayCast.exe`.
 
+## Uruchomienie
 
-\## Uruchomienie
-
-
-
-Program przyjmuje argumenty z linii poleceń określające tryb renderowania oraz plik sceny.
-
-
-
-\*\*Składnia:\*\*
-
-
-
-```bash
-
-./CSGRayCast \[cpu|gpu] \[plik\_sceny]
-
-```
-
-
-
-\*\*Przykłady:\*\*
-
-
-
-```bash
-
-./CSGRayCast gpu helix\_complex.txt
-
-./CSGRayCast cpu industrial\_complex.txt
-
-
-
-```
-
-
-
-\## Format Plików
-
-
-
-Sceny definiowane są w plikach tekstowych `.txt`. Parser przetwarza plik linia po linii w sposób rekurencyjny (Pre-order traversal). Wcięcia (indentacja) stosowane są dla czytelności kodu, ale logiczna struktura wynika z kolejności definicji.
-
-
-
-Każda linia rozpoczyna się od nazwy typu węzła (`union`, `intersection`, `difference` lub nazwa prymitywu (kształtu)), po której następują parametry oddzielone spacjami.
-
-
-
-\### 1. Operacje Logiczne (Węzły)
-
-
-
-Operacje CSG przyjmują \*\*dwa argumenty\*\* (lewe i prawe dziecko), które są definiowane w kolejnych liniach po operacji.
-
-
-
-\* `union` - Suma zbiorów.
-
-\* `intersection` - Część wspólna.
-
-\* `difference` - Różnica |(odejmuje drugi kształt od pierwszego).
-
-
-
-\### 2. Prymitywy (Liście)
-
-
-
-Każdy prymityw definiowany jest przez parametry geometryczne, a następnie \*\*6 parametrów materiału\*\*.
-
-
-
-\*\*Wspólne parametry materiału (na końcu każdej linii):\*\*
-
-`r g b diff spec shin`
-
-
-
-\* `r, g, b`: Składowe koloru (0.0 - 1.0).
-
-\* `diff`: Współczynnik rozproszenia (diffuse).
-
-\* `spec`: Współczynnik odbicia lustrzanego (specular).
-
-\* `shin`: Połyskliwość (shininess exponent).
-
-
-
-\*\*Typy prymitywów i ich parametry geometryczne:\*\*
-
-
-
-\* \*\*Kula (`sphere`):\*\*
+Program wymaga trybu renderowania i ?cie?ki do pliku sceny:
 
 ```text
-
-sphere x y z radius \[materiał]
-
-
-
+CSGRayCast.exe <cpu|gpu> <plik_sceny>
 ```
 
+Przyk?ady uruchomione z katalogu g??wnego repozytorium:
 
-
-
-
-\* `x, y, z`: Środek kuli.
-
-\* `radius`: Promień.
-
-
-
-
-
-\* \*\*Prostopadłościan (`cuboid`):\*\*
-
-```text
-
-cuboid x y z w h d \[materiał]
-
-
-
+```powershell
+.\build\Release\CSGRayCast.exe gpu helix_complex.txt
+.\build\Release\CSGRayCast.exe cpu industrial_complex.txt
 ```
 
+Tryb `cpu` nie wymaga karty NVIDIA do renderowania. Tryb `gpu` przenosi drzewo sceny i obliczenia promieni na urz?dzenie CUDA.
 
+## Sterowanie
 
+- **Strza?ki:** obr?t kamery wok?? punktu obserwacji.
+- **W/S/A/D:** obr?t kierunku ?wiat?a.
+- **Zamkni?cie okna:** zako?czenie programu.
 
+## Format plik?w scen
 
-\* `x, y, z`: Współrzędne minimalnego narożnika (min\_pt).
+Scena jest pojedynczym binarnym drzewem CSG zapisanym w porz?dku pre-order. Wci?cia nie wp?ywaj? na parser, ale u?atwiaj? odczyt struktury. Ka?da niepusta linia opisuje operator albo prymityw.
 
-\* `w, h, d`: Szerokość, wysokość, głębokość (wymiary wzdłuż osi X, Y, Z).
+### Operatory CSG
 
+Ka?dy operator przyjmuje dok?adnie dwa poddrzewa zapisane bezpo?rednio po nim:
 
+- `union` ? suma bry? `A ? B`,
+- `intersection` ? cz??? wsp?lna `A ? B`,
+- `difference` ? r??nica `A \ B`.
 
+### Materia?
 
-
-\* \*\*Walec (`cylinder`):\*\*
+Ka?da linia prymitywu ko?czy si? sze?cioma warto?ciami materia?u:
 
 ```text
-
-cylinder x y z radius height \[materiał]
-
-
-
+r g b diff spec shin
 ```
 
+- `r g b` ? sk?adowe koloru w zakresie od 0 do 1,
+- `diff` ? wsp??czynnik odbicia rozproszonego,
+- `spec` ? wsp??czynnik odbicia lustrzanego,
+- `shin` ? wyk?adnik po?yskliwo?ci.
 
+### Prymitywy
 
+| Prymityw | Sk?adnia | Znaczenie pozycji |
+| --- | --- | --- |
+| Kula | `sphere x y z radius [materia?]` | ?rodek kuli |
+| Prostopad?o?cian | `cuboid x y z w h d [materia?]` | minimalny naro?nik |
+| Walec | `cylinder x y z radius height [materia?]` | ?rodek dolnej podstawy |
+| Sto?ek | `cone x y z radius height [materia?]` | ?rodek dolnej podstawy |
 
+Walec i sto?ek s? ustawione wzd?u? osi Y. Warto?? `height` okre?la odleg?o?? od dolnej podstawy w kierunku dodatnim osi Y.
 
-\* `x, y, z`: Środek podstawy dolnej.
-
-\* `radius`: Promień podstawy.
-
-\* `height`: Wysokość (wzdłuż osi Y).
-
-
-
-
-
-\* \*\*Stożek (`cone`):\*\*
-
-```text
-
-cone x y z radius height \[materiał]
-
-
-
-```
-
-
-
-
-
-\* `x, y, z`: Środek podstawy dolnej.
-
-\* `radius`: Promień podstawy.
-
-\* `height`: Wysokość (wzdłuż osi Y, wierzchołek znajduje się w `y + height`).
-
-
-
-
-
-
-
-\### Przykład definicji sceny
-
-
+### Przyk?ad sceny
 
 ```text
-
 difference
-
-&nbsp; sphere 0.0 0.0 0.0 1.4 1.0 0.2 0.2 0.8 0.6 64
-
-&nbsp; cuboid -1.1 -1.1 -1.1 2.2 2.2 2.2 0.2 0.2 1.0 0.8 0.5 32
-
-
-
+  sphere 0.0 0.0 0.0 1.4 1.0 0.2 0.2 0.8 0.6 64
+  cuboid -1.1 -1.1 -1.1 2.2 2.2 2.2 0.2 0.2 1.0 0.8 0.5 32
 ```
 
+Ten zapis odejmuje prostopad?o?cian od kuli.
 
+## Generator scen
 
-\*Powyższy kod definiuje kulę, od której odejmowany jest prostopadłościan (sześcian).\*
+Skrypt `gen_scene.py` tworzy proceduralne sceny miejskie o przybli?onej liczbie w?z??w:
 
+```powershell
+python gen_scene.py 500 generated_city.txt
+```
 
+W repozytorium znajduj? si? r?wnie? gotowe sceny, od prostych przypadk?w z jedn? bry?? po du?e drzewa `big_city.txt` i `large_city.txt`.
 
+## Jak dzia?a renderer
 
+### Przeci?cia i operacje CSG
 
-\## Sterowanie
+Ka?dy prymityw zwraca przedzia? `Span`, w kt?rym promie? znajduje si? wewn?trz bry?y. Przedzia? zawiera czasy wej?cia i wyj?cia (`t_entry` oraz `t_exit`), normalne powierzchni i identyfikator materia?u.
 
+Operatory ??cz? posortowane przedzia?y:
 
+- **Union:** scala zachodz?ce na siebie przedzia?y.
+- **Intersection:** zachowuje wy??cznie ich wsp?ln? cz???.
+- **Difference:** usuwa z przedzia??w lewego obiektu fragmenty nale??ce do prawego obiektu.
 
-Aplikacja umożliwia interaktywną zmianę pozycji kamery oraz źródła światła:
+Najbli?sze dodatnie przeci?cie po wykonaniu ca?ego drzewa s?u?y do obliczenia koloru piksela.
 
+### P?aska reprezentacja drzewa
 
+`FlatCSGTree` przechowuje drzewo w tablicach zamiast w strukturze opartej na wska?nikach. Topologia znajduje si? w tablicach `nodes`, `left_indexes` i `right_indexes`, a dane prymityw?w i materia??w s? skompaktowane osobno.
 
-\* \*\*Strzałki (Góra/Dół/Lewo/Prawo):\*\* Obrót kamery wokół punktu skupienia (orbitowanie).
+Renderer przetwarza indeksy w porz?dku post-order. Dzi?ki temu mo?e oblicza? wynik iteracyjnie za pomoc? stosu i u?ywa? tej samej reprezentacji na CPU oraz GPU.
 
-\* \*\*Klawisze W/S/A/D:\*\* Ruch źródła światła.
+### Pami?? CPU i GPU
 
-\* \*\*Zamknięcie okna:\*\* Zakończenie programu.
+Renderer CPU przydziela bufory robocze raz na klatk? i wykorzystuje je ponownie dla kolejnych promieni.
 
+Renderer GPU wyznacza wymagany rozmiar puli przed startem kernela. Globalny bufor jest dzielony mi?dzy piksele, a rendering odbywa si? partiami ograniczonymi bud?etem pami?ci. Topologia drzewa i dane prymityw?w s? kopiowane do pami?ci wsp??dzielonej dla ka?dego bloku w?tk?w.
 
+## Struktura projektu
 
-\## Dodatkowe Kształty
-
-Program obsługuje 4 kształty:
-
-
-
-* Sfera
-* Prostopadłościan
-* Cylinder
-* Stożek
-
-
-
----
-
-
-
-\## Opis Techniczny i Zasada Działania
-
-
-
-\### Algorytm Ray Tracingu CSG
-
-
-
-1\. Każdy prymityw (np. Kula, Sześcian) zwraca listę odcinków (`Spans`), w których promień przebywa "wewnątrz" bryły. Odcinek składa się z czasu wejścia () i wyjścia () oraz wektorów normalnych w tych punktach.
-
-
-
-
-
-2\. Operacje logiczne łączą te odcinki:
-
-\* \*\*Union ():\*\* Scalanie nakładających się odcinków.
-
-\* \*\*Intersection ():\*\* Znalezienie części wspólnej odcinków.
-
-\* \*\*Difference ():\*\* Wycięcie odcinków obiektu  z odcinków obiektu .
-
-
-
-
-
-
-
-\### Reprezentacja Drzewa CSG (Flattening)
-
-
-
-Drzewa binarne oparte na wskaźnikach są nieefektywne na GPU. Projekt wykorzystuje strukturę `FlatCSGTree`, która spłaszcza drzewo do tablic liniowych (SoA - Structure of Arrays):
-
-
-
-\* Węzły drzewa są przechowywane w tablicy `nodes`.
-
-\* Relacje rodzic-dziecko są reprezentowane przez indeksy w tablicach `left\_indexes` i `right\_indexes`.
-
-\* Dane geometryczne (promienie, wymiary) są oddzielone od topologii i skompaktowane tylko dla węzłów liści (prymitywów), co oszczędza pamięć.
-
-
-
-
-
-
-
-Drzewo jest przetwarzane w porządku \*\*Post-Order\*\* (od dołu do góry), co pozwala na ewaluację przy użyciu stosu.
-
-
-
-\### Implementacja GPU (CUDA)
-
-
-
-\#### Zarządzanie Pamięcią (Stack-less dynamic allocation)
-
-
-
-Największym wyzwaniem w CSG na GPU jest nieznana z góry liczba przedziałów, które wygeneruje promień. Dynamiczna alokacja (`malloc`/`new`) wewnątrz kernela jest bardzo wolna.
-
-Rozwiązanie zastosowane w projekcie:
-
-
-
-1\. \*\*Analiza wstępna (Host):\*\* Przed uruchomieniem renderowania, funkcja `computeTotalSpanUsage` symuluje przejście przez drzewo na CPU, przy każdym nodzie szacując ilość Span z góry, obliczając maksymalny potrzebny rozmiar stosu i bufora odcinków (`max\_pool\_size`, `max\_stack\_depth`).
-
-
-
-2\. \*\*Globalny Bufor (Device):\*\* Alokowany jest jeden duży blok pamięci globalnej, podzielony dla każdego piksela/wątku.
-
-
-
-3\. \*\*Kernel:\*\* Każdy wątek otrzymuje wskaźnik do własnego fragmentu pamięci SoA: `StridedSpan`, `StridedStack`. Działając bez blokad i bez dynamicznej alokacji.
-
-
-
-
-
-
-
-\#### Pamięć Współdzielona (Shared Memory)
-
-
-
-Aby przyspieszyć dostęp do struktury drzewa, cała topologia (`nodes`, indeksy) oraz dane prymitywów są kopiowane do \*\*Shared Memory\*\* na początku działania bloku wątków. Dzięki temu wszystkie wątki w bloku mają błyskawiczny dostęp do definicji sceny, co drastycznie redukuje opóźnienia pamięci globalnej.
-
-
-
-\### Parsowanie Plików
-
-
-
-Sceny są wczytywane z plików tekstowych. Parser rekurencyjnie buduje strukturę drzewa.
-
-
-
-\## Struktura Plików
-
-
-
-* `main.cu`: Punkt wejścia, pętla główna, obsługa SDL, uruchamianie kerneli.
-
-
-
-
-
-* `tracer.cu`: Logika renderowania, implementacja operacji CSG (Union, Intersection, Difference) na odcinkach, kernel CUDA.
-
-
-
-
-
-* `shape.h`: Definicje analityczne prymitywów (Sphere, Cuboid, Cylinder, Cone) i obliczanie przecięć promieni.
-
-
-
-
-
-* `csg.h` / `loadfile.cpp`: Definicje struktur danych drzewa i parser plików sceny.
-
-
-
-
-
-* `rayCast.h`: Podstawowe struktury matematyczne (Wektor, Promień, Kamera, Kolor).
+- `CSGRayCast/main.cu` ? punkt wej?cia, obs?uga SDL oraz rendering CPU/GPU.
+- `CSGRayCast/tracer.cu` ? ?ledzenie promieni, operacje na przedzia?ach i kernel CUDA.
+- `CSGRayCast/shape.h` ? analityczne przeci?cia kuli, prostopad?o?cianu, walca i sto?ka.
+- `CSGRayCast/csg.h` ? p?aska reprezentacja drzewa CSG.
+- `CSGRayCast/loadfile.cpp` ? parser plik?w scen.
+- `CSGRayCast/rayCast.h` ? wektory, promienie, kamera, ?wiat?o i kolory.
+- `gen_scene.py` ? generator proceduralnych scen miejskich.
