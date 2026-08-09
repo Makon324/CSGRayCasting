@@ -5,15 +5,23 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_STANDARD 17)
 
-# Point to local SDL2 binaries in the sibling directory
-get_filename_component(PARENT_DIR ${CMAKE_CURRENT_SOURCE_DIR} DIRECTORY)
-set(SDL2_ROOT "${PARENT_DIR}/SDL2-2.32.10")
+find_package(SDL2 CONFIG QUIET)
 
-# Debug: verify path if find_package fails
-message(STATUS "SDL2_ROOT: ${SDL2_ROOT}")
+if(NOT TARGET SDL2::SDL2)
+    include(FetchContent)
 
-list(APPEND CMAKE_PREFIX_PATH "${SDL2_ROOT}")
-find_package(SDL2 REQUIRED)
+    set(SDL_SHARED ON CACHE BOOL "Build a shared SDL library" FORCE)
+    set(SDL_STATIC OFF CACHE BOOL "Build a static SDL library" FORCE)
+    set(SDL_TEST OFF CACHE BOOL "Build SDL tests" FORCE)
+
+    FetchContent_Declare(
+        SDL2
+        GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+        GIT_TAG release-2.32.10
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(SDL2)
+endif()
 
 file(GLOB SOURCES "*.cpp" "*.cu")
 add_executable(CSGRayCast ${SOURCES})
@@ -25,10 +33,13 @@ else()
     target_link_libraries(CSGRayCast PRIVATE SDL2::SDL2)
 endif()
 
-# Ensure SDL2.dll is in the same directory as the executable
-add_custom_command(TARGET CSGRayCast POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-    "${SDL2_ROOT}/lib/x64/SDL2.dll"
-    $<TARGET_FILE_DIR:CSGRayCast>
-    COMMENT "Deploying SDL2.dll"
-)
+# Deploy runtime dependencies next to the executable on Windows.
+if(WIN32)
+    add_custom_command(TARGET CSGRayCast POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_RUNTIME_DLLS:CSGRayCast>
+        $<TARGET_FILE_DIR:CSGRayCast>
+        COMMAND_EXPAND_LISTS
+        COMMENT "Deploying runtime dependencies"
+    )
+endif()

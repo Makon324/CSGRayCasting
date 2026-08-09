@@ -1,1 +1,34 @@
 .vs/
+.vscode/
+
+# CMake and IDE build trees
+build/
+**/build/
+out/
+**/out/
+x64/
+**/x64/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+
+# Visual Studio user state
+*.user
+*.suo
+
+# Compiled output and intermediate files
+*.cache
+*.deps
+*.dll
+*.exe
+*.exp
+*.ilk
+*.lib
+*.log
+*.obj
+*.pdb
+*.recipe
+*.tlog
+
+# Dependencies are resolved by CMake instead of being vendored.
+SDL2-*/
