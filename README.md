@@ -1,37 +1,37 @@
 # CSG Ray Casting
 
-Interaktywny ray tracer bry? CSG (Constructive Solid Geometry) dzia?aj?cy na CPU lub GPU przez CUDA. Sceny sk?adaj? si? z prymityw?w ??czonych operacjami sumy, cz??ci wsp?lnej i r??nicy, a wynik jest wy?wietlany w oknie SDL2.
+An interactive CSG (Constructive Solid Geometry) ray tracer that runs on the CPU or GPU through CUDA. Scenes consist of primitives combined with union, intersection, and difference operations, and the result is displayed in an SDL2 window.
 
-## Przyk?adowe rendery
+## Example renders
 
-| Operacje CSG | Scena przemys?owa | Helisa |
+| CSG operations | Industrial scene | Helix |
 | --- | --- | --- |
-| ![Render operacji CSG](docs/renders/complex_scene.png) | ![Render sceny przemys?owej](docs/renders/industrial_complex.png) | ![Render helisy](docs/renders/helix_complex.png) |
+| ![Render demonstrating CSG operations](docs/renders/complex_scene.png) | ![Render of an industrial scene](docs/renders/industrial_complex.png) | ![Render of a helix](docs/renders/helix_complex.png) |
 
-## Wymagania
+## Requirements
 
-- Windows 10 lub 11
-- CMake 3.18 lub nowszy
-- Visual Studio 2022 z narz?dziami C++
+- Windows 10 or 11
+- CMake 3.18 or newer
+- Visual Studio 2022 with the C++ toolchain
 - NVIDIA CUDA Toolkit
-- karta NVIDIA obs?uguj?ca CUDA ? tylko dla trybu `gpu`
+- A CUDA-capable NVIDIA GPU — required only for `gpu` mode
 
-CMake najpierw szuka zainstalowanego SDL2. Je?li go nie znajdzie, pobiera przypi?t? wersj? SDL 2.32.10 podczas pierwszej konfiguracji.
+CMake first looks for an installed copy of SDL2. If one is not found, it downloads the pinned SDL 2.32.10 release during the first configuration.
 
-## Kompilacja
+## Building
 
-Z katalogu g??wnego repozytorium uruchom:
+Run the following commands from the repository root:
 
 ```powershell
 cmake -S CSGRayCast -B build
 cmake --build build --config Release
 ```
 
-Dla generatora Visual Studio plik wykonywalny zostanie utworzony jako `build\Release\CSGRayCast.exe`.
+With the Visual Studio generator, the executable is created at `build\Release\CSGRayCast.exe`.
 
-## Testy
+## Tests
 
-Testy jednostkowe dzia?aj? na CPU i nie wymagaj? aktywnego urz?dzenia CUDA:
+The unit tests run on the CPU and do not require an active CUDA device:
 
 ```powershell
 cmake -S CSGRayCast -B build -DBUILD_TESTING=ON
@@ -39,9 +39,9 @@ cmake --build build --config Release --target CSGRayCastTests
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-## Benchmarki
+## Benchmarks
 
-Benchmark CPU wykonuje rozgrzewk?, a nast?pnie mierzy produkcyjny parser i tracer dla trzech scen:
+The CPU benchmark performs a warm-up and then measures the production parser and tracer across three scenes:
 
 ```powershell
 cmake -S CSGRayCast -B build -DCSGRAYCAST_BUILD_BENCHMARKS=ON
@@ -49,74 +49,74 @@ cmake --build build --config Release --target CSGRayCastBenchmarks
 .\build\Release\CSGRayCastBenchmarks.exe . 3 160 120
 ```
 
-Argumenty po ?cie?ce repozytorium oznaczaj? kolejno liczb? iteracji, szeroko?? i wysoko??. Wynik jest zapisywany na standardowe wyj?cie w formacie CSV.
+The arguments after the repository path are the iteration count, width, and height, respectively. Results are written to standard output in CSV format.
 
-## Uruchomienie
+## Running
 
-Program wymaga trybu renderowania i ?cie?ki do pliku sceny:
+The program requires a rendering mode and a path to a scene file:
 
 ```text
-CSGRayCast.exe <cpu|gpu> <plik_sceny> [output.bmp]
+CSGRayCast.exe <cpu|gpu> <scene_file> [output.bmp]
 ```
 
-Przyk?ady uruchomione z katalogu g??wnego repozytorium:
+Examples run from the repository root:
 
 ```powershell
 .\build\Release\CSGRayCast.exe gpu helix_complex.txt
 .\build\Release\CSGRayCast.exe cpu industrial_complex.txt
 ```
 
-Opcjonalny trzeci argument renderuje jedn? klatk? w ukrytym oknie, zapisuje j? jako BMP i ko?czy program:
+The optional third argument renders one frame in a hidden window, saves it as a BMP, and exits:
 
 ```powershell
 .\build\Release\CSGRayCast.exe cpu complex_scene.txt render.bmp
 ```
 
-Tryb `cpu` nie wymaga karty NVIDIA do renderowania. Tryb `gpu` przenosi drzewo sceny i obliczenia promieni na urz?dzenie CUDA.
+The `cpu` mode does not require an NVIDIA GPU for rendering. The `gpu` mode moves the scene tree and ray calculations to the CUDA device.
 
-## Sterowanie
+## Controls
 
-- **Strza?ki:** obr?t kamery wok?? punktu obserwacji.
-- **W/S/A/D:** obr?t kierunku ?wiat?a.
-- **Zamkni?cie okna:** zako?czenie programu.
+- **Arrow keys:** Rotate the camera around its target.
+- **W/S/A/D:** Rotate the light direction.
+- **Close the window:** Exit the program.
 
-## Format plik?w scen
+## Scene file format
 
-Scena jest pojedynczym binarnym drzewem CSG zapisanym w porz?dku pre-order. Wci?cia nie wp?ywaj? na parser, ale u?atwiaj? odczyt struktury. Ka?da niepusta linia opisuje operator albo prymityw.
+A scene is a single binary CSG tree stored in pre-order. Indentation does not affect parsing, but it makes the structure easier to read. Every non-empty line describes either an operator or a primitive.
 
-### Operatory CSG
+### CSG operators
 
-Ka?dy operator przyjmuje dok?adnie dwa poddrzewa zapisane bezpo?rednio po nim:
+Each operator takes exactly two subtrees, written immediately after it:
 
-- `union` ? suma bry? `A ? B`,
-- `intersection` ? cz??? wsp?lna `A ? B`,
-- `difference` ? r??nica `A \ B`.
+- `union` — union of the solids, `A ∪ B`;
+- `intersection` — common part of the solids, `A ∩ B`;
+- `difference` — difference of the solids, `A \ B`.
 
-### Materia?
+### Material
 
-Ka?da linia prymitywu ko?czy si? sze?cioma warto?ciami materia?u:
+Each primitive line ends with six material values:
 
 ```text
 r g b diff spec shin
 ```
 
-- `r g b` ? sk?adowe koloru w zakresie od 0 do 1,
-- `diff` ? wsp??czynnik odbicia rozproszonego,
-- `spec` ? wsp??czynnik odbicia lustrzanego,
-- `shin` ? wyk?adnik po?yskliwo?ci.
+- `r g b` — color components in the range from 0 to 1;
+- `diff` — diffuse reflection coefficient;
+- `spec` — specular reflection coefficient;
+- `shin` — shininess exponent.
 
-### Prymitywy
+### Primitives
 
-| Prymityw | Sk?adnia | Znaczenie pozycji |
+| Primitive | Syntax | Position meaning |
 | --- | --- | --- |
-| Kula | `sphere x y z radius [materia?]` | ?rodek kuli |
-| Prostopad?o?cian | `cuboid x y z w h d [materia?]` | minimalny naro?nik |
-| Walec | `cylinder x y z radius height [materia?]` | ?rodek dolnej podstawy |
-| Sto?ek | `cone x y z radius height [materia?]` | ?rodek dolnej podstawy |
+| Sphere | `sphere x y z radius [material]` | Sphere center |
+| Cuboid | `cuboid x y z w h d [material]` | Minimum corner |
+| Cylinder | `cylinder x y z radius height [material]` | Center of the bottom base |
+| Cone | `cone x y z radius height [material]` | Center of the bottom base |
 
-Walec i sto?ek s? ustawione wzd?u? osi Y. Warto?? `height` okre?la odleg?o?? od dolnej podstawy w kierunku dodatnim osi Y.
+The cylinder and cone are aligned with the Y axis. The `height` value specifies the distance from the bottom base in the positive Y direction.
 
-### Przyk?ad sceny
+### Example scene
 
 ```text
 difference
@@ -124,53 +124,53 @@ difference
   cuboid -1.1 -1.1 -1.1 2.2 2.2 2.2 0.2 0.2 1.0 0.8 0.5 32
 ```
 
-Ten zapis odejmuje prostopad?o?cian od kuli.
+This definition subtracts the cuboid from the sphere.
 
-## Generator scen
+## Scene generator
 
-Skrypt `gen_scene.py` tworzy proceduralne sceny miejskie o przybli?onej liczbie w?z??w:
+The `gen_scene.py` script creates procedural city scenes with an approximate node count:
 
 ```powershell
 python gen_scene.py 500 generated_city.txt
 ```
 
-W repozytorium znajduj? si? r?wnie? gotowe sceny, od prostych przypadk?w z jedn? bry?? po du?e drzewa `big_city.txt` i `large_city.txt`.
+The repository also contains ready-to-use scenes, ranging from simple single-solid examples to the large `big_city.txt` and `large_city.txt` trees.
 
-## Jak dzia?a renderer
+## How the renderer works
 
-### Przeci?cia i operacje CSG
+### Intersections and CSG operations
 
-Ka?dy prymityw zwraca przedzia? `Span`, w kt?rym promie? znajduje si? wewn?trz bry?y. Przedzia? zawiera czasy wej?cia i wyj?cia (`t_entry` oraz `t_exit`), normalne powierzchni i identyfikator materia?u.
+Each primitive returns a `Span` interval during which the ray is inside the solid. The interval contains entry and exit times (`t_entry` and `t_exit`), surface normals, and a material identifier.
 
-Operatory ??cz? posortowane przedzia?y:
+Operators combine sorted intervals:
 
-- **Union:** scala zachodz?ce na siebie przedzia?y.
-- **Intersection:** zachowuje wy??cznie ich wsp?ln? cz???.
-- **Difference:** usuwa z przedzia??w lewego obiektu fragmenty nale??ce do prawego obiektu.
+- **Union:** Merges overlapping intervals.
+- **Intersection:** Keeps only their common portion.
+- **Difference:** Removes portions belonging to the right-hand object from the left-hand object's intervals.
 
-Najbli?sze dodatnie przeci?cie po wykonaniu ca?ego drzewa s?u?y do obliczenia koloru piksela.
+The closest positive intersection after evaluating the complete tree determines the pixel color.
 
-### P?aska reprezentacja drzewa
+### Flat tree representation
 
-`FlatCSGTree` przechowuje drzewo w tablicach zamiast w strukturze opartej na wska?nikach. Topologia znajduje si? w tablicach `nodes`, `left_indexes` i `right_indexes`, a dane prymityw?w i materia??w s? skompaktowane osobno.
+`FlatCSGTree` stores the tree in arrays instead of a pointer-based structure. Its topology is held in the `nodes`, `left_indexes`, and `right_indexes` arrays, while primitive and material data are compacted separately.
 
-Renderer przetwarza indeksy w porz?dku post-order. Dzi?ki temu mo?e oblicza? wynik iteracyjnie za pomoc? stosu i u?ywa? tej samej reprezentacji na CPU oraz GPU.
+The renderer processes indices in post-order. This lets it evaluate the tree iteratively with a stack and use the same representation on both the CPU and GPU.
 
-### Pami?? CPU i GPU
+### CPU and GPU memory
 
-Renderer CPU przydziela bufory robocze raz na klatk? i wykorzystuje je ponownie dla kolejnych promieni.
+The CPU renderer allocates scratch buffers once per frame and reuses them for subsequent rays.
 
-Renderer GPU wyznacza wymagany rozmiar puli przed startem kernela. Globalny bufor jest dzielony mi?dzy piksele, a rendering odbywa si? partiami ograniczonymi bud?etem pami?ci. Topologia drzewa i dane prymityw?w s? kopiowane do pami?ci wsp??dzielonej dla ka?dego bloku w?tk?w.
+The GPU renderer calculates the required pool size before launching the kernel. A global buffer is divided among pixels, and rendering proceeds in batches constrained by the memory budget. Tree topology and primitive data are copied into shared memory for each thread block.
 
-## Struktura projektu
+## Project structure
 
-- `CSGRayCast/main.cu` ? punkt wej?cia, obs?uga SDL oraz rendering CPU/GPU.
-- `CSGRayCast/tracer.cu` ? ?ledzenie promieni, operacje na przedzia?ach i kernel CUDA.
-- `CSGRayCast/shape.h` ? analityczne przeci?cia kuli, prostopad?o?cianu, walca i sto?ka.
-- `CSGRayCast/csg.h` ? p?aska reprezentacja drzewa CSG.
-- `CSGRayCast/loadfile.cpp` ? parser plik?w scen.
-- `CSGRayCast/rayCast.h` ? wektory, promienie, kamera, ?wiat?o i kolory.
-- `gen_scene.py` ? generator proceduralnych scen miejskich.
+- `CSGRayCast/main.cu` — entry point, SDL handling, and CPU/GPU rendering.
+- `CSGRayCast/tracer.cu` — ray tracing, interval operations, and the CUDA kernel.
+- `CSGRayCast/shape.h` — analytical intersections for spheres, cuboids, cylinders, and cones.
+- `CSGRayCast/csg.h` — flat CSG tree representation.
+- `CSGRayCast/loadfile.cpp` — scene file parser.
+- `CSGRayCast/rayCast.h` — vectors, rays, camera, light, and colors.
+- `gen_scene.py` — procedural city scene generator.
 
 ## License
 
