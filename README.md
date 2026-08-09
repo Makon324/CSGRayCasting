@@ -171,3 +171,7 @@ Renderer GPU wyznacza wymagany rozmiar puli przed startem kernela. Globalny bufo
 - `CSGRayCast/loadfile.cpp` ? parser plik?w scen.
 - `CSGRayCast/rayCast.h` ? wektory, promienie, kamera, ?wiat?o i kolory.
 - `gen_scene.py` ? generator proceduralnych scen miejskich.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
