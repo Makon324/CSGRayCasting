@@ -56,3 +56,14 @@ if(BUILD_TESTING)
     target_include_directories(CSGRayCastTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     add_test(NAME CSGRayCast.Core COMMAND CSGRayCastTests "${CMAKE_CURRENT_SOURCE_DIR}/..")
 endif()
+
+option(CSGRAYCAST_BUILD_BENCHMARKS "Build the CPU benchmark executable" OFF)
+
+if(CSGRAYCAST_BUILD_BENCHMARKS)
+    add_executable(CSGRayCastBenchmarks
+        ../benchmarks/benchmark_csg.cu
+        loadfile.cpp
+        tracer.cu
+    )
+    target_include_directories(CSGRayCastBenchmarks PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+endif()

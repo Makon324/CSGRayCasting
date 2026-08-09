@@ -39,6 +39,18 @@ cmake --build build --config Release --target CSGRayCastTests
 ctest --test-dir build -C Release --output-on-failure
 ```
 
+## Benchmarki
+
+Benchmark CPU wykonuje rozgrzewk?, a nast?pnie mierzy produkcyjny parser i tracer dla trzech scen:
+
+```powershell
+cmake -S CSGRayCast -B build -DCSGRAYCAST_BUILD_BENCHMARKS=ON
+cmake --build build --config Release --target CSGRayCastBenchmarks
+.\build\Release\CSGRayCastBenchmarks.exe . 3 160 120
+```
+
+Argumenty po ?cie?ce repozytorium oznaczaj? kolejno liczb? iteracji, szeroko?? i wysoko??. Wynik jest zapisywany na standardowe wyj?cie w formacie CSV.
+
 ## Uruchomienie
 
 Program wymaga trybu renderowania i ?cie?ki do pliku sceny:
