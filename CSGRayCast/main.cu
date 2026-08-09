@@ -154,10 +154,11 @@ void updateSurface(SDL_Surface* surface, Color* h_image) {
 
 int main(int argc, char** argv) {
     if (argc < 3) {
-        std::cerr << "Usage: " << argv[0] << " [cpu|gpu] [scene_file]\n";
+        std::cerr << "Usage: " << argv[0] << " [cpu|gpu] [scene_file] [output.bmp]\n";
         return 1;
     }
     bool use_gpu = (std::strcmp(argv[1], "gpu") == 0);
+    const char* output_file = argc >= 4 ? argv[3] : nullptr;
 
     FlatCSGTree h_tree;
     try {
@@ -227,11 +228,13 @@ int main(int argc, char** argv) {
     }
 
     SDL_Init(SDL_INIT_VIDEO);
-    SDL_Window* window = SDL_CreateWindow("CSG Ray Tracer", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, WIDTH, HEIGHT, 0);
+    Uint32 window_flags = output_file ? SDL_WINDOW_HIDDEN : 0;
+    SDL_Window* window = SDL_CreateWindow("CSG Ray Tracer", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, WIDTH, HEIGHT, window_flags);
     SDL_Surface* surface = SDL_GetWindowSurface(window);
     float angle = 0.0f;
     Vec3 initial_origin(5.0f * sinf(angle), 0.0f, 5.0f * cosf(angle));
     Camera cam(initial_origin, lookat, up, fov, WIDTH, HEIGHT);
+    int exit_code = 0;
 
     bool running = true;
     auto last_time = std::chrono::high_resolution_clock::now();
@@ -272,8 +275,19 @@ int main(int argc, char** argv) {
         }
         updateSurface(surface, h_image);
         SDL_UpdateWindowSurface(window);
-        
-        std::cout << "Frame Time: " << (dt * 1000.0f) << " ms (" << (1.0f / dt) << " FPS)" << std::endl;    
+        if (output_file) {
+            if (SDL_SaveBMP(surface, output_file) != 0) {
+                std::cerr << "[Error] Failed to save render: " << SDL_GetError() << std::endl;
+                exit_code = 1;
+            }
+            else {
+                std::cout << "Saved render to '" << output_file << "'." << std::endl;
+            }
+            running = false;
+        }
+        else {
+            std::cout << "Frame Time: " << (dt * 1000.0f) << " ms (" << (1.0f / dt) << " FPS)" << std::endl;
+        }
     }
 
     SDL_DestroyWindow(window);
@@ -286,5 +300,5 @@ int main(int argc, char** argv) {
         freeDeviceTree(d_tree);
     }
     freeHostTree(h_tree);
-    return 0;
+    return exit_code;
 }

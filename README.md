@@ -2,6 +2,12 @@
 
 Interaktywny ray tracer bry? CSG (Constructive Solid Geometry) dzia?aj?cy na CPU lub GPU przez CUDA. Sceny sk?adaj? si? z prymityw?w ??czonych operacjami sumy, cz??ci wsp?lnej i r??nicy, a wynik jest wy?wietlany w oknie SDL2.
 
+## Przyk?adowe rendery
+
+| Operacje CSG | Scena przemys?owa | Helisa |
+| --- | --- | --- |
+| ![Render operacji CSG](docs/renders/complex_scene.png) | ![Render sceny przemys?owej](docs/renders/industrial_complex.png) | ![Render helisy](docs/renders/helix_complex.png) |
+
 ## Wymagania
 
 - Windows 10 lub 11
@@ -28,7 +34,7 @@ Dla generatora Visual Studio plik wykonywalny zostanie utworzony jako `build\Rel
 Program wymaga trybu renderowania i ?cie?ki do pliku sceny:
 
 ```text
-CSGRayCast.exe <cpu|gpu> <plik_sceny>
+CSGRayCast.exe <cpu|gpu> <plik_sceny> [output.bmp]
 ```
 
 Przyk?ady uruchomione z katalogu g??wnego repozytorium:
@@ -36,6 +42,12 @@ Przyk?ady uruchomione z katalogu g??wnego repozytorium:
 ```powershell
 .\build\Release\CSGRayCast.exe gpu helix_complex.txt
 .\build\Release\CSGRayCast.exe cpu industrial_complex.txt
+```
+
+Opcjonalny trzeci argument renderuje jedn? klatk? w ukrytym oknie, zapisuje j? jako BMP i ko?czy program:
+
+```powershell
+.\build\Release\CSGRayCast.exe cpu complex_scene.txt render.bmp
 ```
 
 Tryb `cpu` nie wymaga karty NVIDIA do renderowania. Tryb `gpu` przenosi drzewo sceny i obliczenia promieni na urz?dzenie CUDA.
