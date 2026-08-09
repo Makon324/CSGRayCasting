@@ -4,6 +4,7 @@ project(CSGRayCast LANGUAGES CXX CUDA)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 find_package(SDL2 CONFIG QUIET)
 
@@ -42,4 +43,16 @@ if(WIN32)
         COMMAND_EXPAND_LISTS
         COMMENT "Deploying runtime dependencies"
     )
+endif()
+
+include(CTest)
+
+if(BUILD_TESTING)
+    add_executable(CSGRayCastTests
+        ../tests/test_csg.cu
+        loadfile.cpp
+        tracer.cu
+    )
+    target_include_directories(CSGRayCastTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME CSGRayCast.Core COMMAND CSGRayCastTests "${CMAKE_CURRENT_SOURCE_DIR}/..")
 endif()

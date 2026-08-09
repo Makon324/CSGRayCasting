@@ -29,6 +29,16 @@ cmake --build build --config Release
 
 Dla generatora Visual Studio plik wykonywalny zostanie utworzony jako `build\Release\CSGRayCast.exe`.
 
+## Testy
+
+Testy jednostkowe dzia?aj? na CPU i nie wymagaj? aktywnego urz?dzenia CUDA:
+
+```powershell
+cmake -S CSGRayCast -B build -DBUILD_TESTING=ON
+cmake --build build --config Release --target CSGRayCastTests
+ctest --test-dir build -C Release --output-on-failure
+```
+
 ## Uruchomienie
 
 Program wymaga trybu renderowania i ?cie?ki do pliku sceny:
