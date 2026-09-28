@@ -4,6 +4,9 @@
 #include <cmath>
 #include <SDL.h>
 #include <chrono>
+#include <filesystem>
+#include <string>
+#include <stdexcept>
 #include <cuda_runtime.h>
 
 #include "csg.h"
@@ -153,12 +156,35 @@ void updateSurface(SDL_Surface* surface, Color* h_image) {
 }
 
 int main(int argc, char** argv) {
-    if (argc < 3) {
-        std::cerr << "Usage: " << argv[0] << " [cpu|gpu] [scene_file] [output.bmp]\n";
+    const bool animate = argc >= 4 && std::strcmp(argv[3], "--animate") == 0;
+    if (argc < 3 || (std::strcmp(argv[1], "cpu") != 0 && std::strcmp(argv[1], "gpu") != 0)
+        || (animate ? argc != 7 : argc > 4)) {
+        std::cerr << "Usage: " << argv[0] << " <cpu|gpu> <scene_file> [output.bmp]\n"
+            << "       " << argv[0] << " <cpu|gpu> <scene_file> --animate <camera|light> <output_directory> <frames>\n";
         return 1;
     }
     bool use_gpu = (std::strcmp(argv[1], "gpu") == 0);
-    const char* output_file = argc >= 4 ? argv[3] : nullptr;
+    const char* output_file = !animate && argc == 4 ? argv[3] : nullptr;
+    int frame_count = 0;
+    bool animate_camera = false;
+    if (animate) {
+        try {
+            animate_camera = std::strcmp(argv[4], "camera") == 0;
+            if (!animate_camera && std::strcmp(argv[4], "light") != 0)
+                throw std::runtime_error("Animation must be camera or light.");
+            size_t consumed = 0;
+            frame_count = std::stoi(argv[6], &consumed);
+            if (consumed != std::strlen(argv[6]) || frame_count < 2 || frame_count > 1000)
+                throw std::runtime_error("Frame count must be an integer from 2 to 1000.");
+            // Require a new directory so an export cannot overwrite earlier captures.
+            if (!std::filesystem::create_directories(argv[5]))
+                throw std::runtime_error("Output directory already exists; choose a new directory.");
+        }
+        catch (const std::exception& e) {
+            std::cerr << "[Error] " << e.what() << std::endl;
+            return 1;
+        }
+    }
 
     FlatCSGTree h_tree;
     try {
@@ -228,12 +254,17 @@ int main(int argc, char** argv) {
     }
 
     SDL_Init(SDL_INIT_VIDEO);
-    Uint32 window_flags = output_file ? SDL_WINDOW_HIDDEN : 0;
+    Uint32 window_flags = (output_file || animate) ? SDL_WINDOW_HIDDEN : 0;
     SDL_Window* window = SDL_CreateWindow("CSG Ray Tracer", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, WIDTH, HEIGHT, window_flags);
     SDL_Surface* surface = SDL_GetWindowSurface(window);
     float angle = 0.0f;
     Vec3 initial_origin(5.0f * sinf(angle), 0.0f, 5.0f * cosf(angle));
     Camera cam(initial_origin, lookat, up, fov, WIDTH, HEIGHT);
+    // Wider framing keeps the bundled demonstration scenes in view throughout an orbit.
+    if (animate) cam = Camera(Vec3(0, 0, 10), lookat, up, fov, WIDTH, HEIGHT);
+    const Camera capture_camera = cam;
+    const Light capture_light = light;
+    int frame_index = 0;
     int exit_code = 0;
 
     bool running = true;
@@ -253,7 +284,7 @@ int main(int argc, char** argv) {
         const Uint8* state = SDL_GetKeyboardState(nullptr);
 
         // Calculate how much to rotate this specific frame
-        float frame_rotation = ROTATION_SPEED * dt;
+        float frame_rotation = animate ? 0.0f : ROTATION_SPEED * dt;
 
         // CAMERA CONTROLS
         if (state[SDL_SCANCODE_LEFT])  cam.rotateHorizontal(frame_rotation);
@@ -267,6 +298,15 @@ int main(int argc, char** argv) {
         if (state[SDL_SCANCODE_W]) light.rotateVertical(-frame_rotation);
         if (state[SDL_SCANCODE_S]) light.rotateVertical(frame_rotation);
 
+        if (animate) {
+            // Fixed angles produce a seamless loop independent of rendering speed.
+            cam = capture_camera;
+            light = capture_light;
+            const float rotation = 2.0f * static_cast<float>(M_PI) * frame_index / frame_count;
+            if (animate_camera) cam.rotateHorizontal(rotation);
+            else light.rotateHorizontal(rotation);
+        }
+
         if (use_gpu) {
             gpuRender(h_image, d_image, cam, light, d_tree, d_global_pool, d_global_stack, batch_size);
         }
@@ -275,7 +315,20 @@ int main(int argc, char** argv) {
         }
         updateSurface(surface, h_image);
         SDL_UpdateWindowSurface(window);
-        if (output_file) {
+        if (animate) {
+            const std::string number = std::to_string(frame_index);
+            const auto path = std::filesystem::path(argv[5]) / ("frame_" + std::string(4 - number.size(), '0') + number + ".bmp");
+            if (SDL_SaveBMP(surface, path.string().c_str()) != 0) {
+                std::cerr << "[Error] Failed to save frame: " << SDL_GetError() << std::endl;
+                exit_code = 1;
+                running = false;
+            }
+            else {
+                std::cout << "Saved frame " << ++frame_index << "/" << frame_count << std::endl;
+                running = frame_index < frame_count;
+            }
+        }
+        else if (output_file) {
             if (SDL_SaveBMP(surface, output_file) != 0) {
                 std::cerr << "[Error] Failed to save render: " << SDL_GetError() << std::endl;
                 exit_code = 1;

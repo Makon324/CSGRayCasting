@@ -1,12 +1,32 @@
 # CSG Ray Casting
 
-An interactive CSG (Constructive Solid Geometry) ray tracer that runs on the CPU or GPU through CUDA. Scenes consist of primitives combined with union, intersection, and difference operations, and the result is displayed in an SDL2 window.
+CSG Ray Casting is a C++ renderer for constructive solid geometry (CSG), with CPU and CUDA backends. It renders scenes built from spheres, cuboids, cylinders, and cones combined with union, intersection, and difference operations. SDL2 displays the image and handles camera and light controls.
+
+## In motion
+
+![Camera rotating around the helix scene](docs/renders/helix_orbit.gif)
+
+Camera rotation around the helix scene, with a fixed light direction.
+
+![Light rotating around the industrial scene](docs/renders/industrial_lighting.gif)
+
+Light rotation in the industrial scene, with a fixed camera.
+
+These animations were generated with the CPU renderer. Each contains 96 frames and plays at 12.5 frames per second. The playback rate is independent of rendering speed. See [animation capture instructions](docs/animations.md) for the commands used to produce them.
 
 ## Example renders
 
-| CSG operations | Industrial scene | Helix |
-| --- | --- | --- |
-| ![Render demonstrating CSG operations](docs/renders/complex_scene.png) | ![Render of an industrial scene](docs/renders/industrial_complex.png) | ![Render of a helix](docs/renders/helix_complex.png) |
+![Rendered CSG operations scene](docs/renders/complex_scene.png)
+
+CSG operations scene ([scene file](complex_scene.txt)).
+
+![Rendered industrial scene](docs/renders/industrial_complex.png)
+
+Industrial scene ([scene file](industrial_complex.txt)).
+
+![Rendered helix scene](docs/renders/helix_complex.png)
+
+Helix scene ([scene file](helix_complex.txt)).
 
 ## Requirements
 
@@ -134,13 +154,13 @@ The `gen_scene.py` script creates procedural city scenes with an approximate nod
 python gen_scene.py 500 generated_city.txt
 ```
 
-The repository also contains ready-to-use scenes, ranging from simple single-solid examples to the large `big_city.txt` and `large_city.txt` trees.
+The repository includes single-solid scenes, examples of CSG operations, and city scenes in `big_city.txt` and `large_city.txt`.
 
-## How the renderer works
+## Implementation
 
 ### Intersections and CSG operations
 
-Each primitive returns a `Span` interval during which the ray is inside the solid. The interval contains entry and exit times (`t_entry` and `t_exit`), surface normals, and a material identifier.
+Each primitive returns a `Span` interval along the ray that lies inside the solid. The interval contains entry and exit parameters (`t_entry` and `t_exit`), surface normals, and a material identifier.
 
 Operators combine sorted intervals:
 
@@ -154,7 +174,7 @@ The closest positive intersection after evaluating the complete tree determines 
 
 `FlatCSGTree` stores the tree in arrays instead of a pointer-based structure. Its topology is held in the `nodes`, `left_indexes`, and `right_indexes` arrays, while primitive and material data are compacted separately.
 
-The renderer processes indices in post-order. This lets it evaluate the tree iteratively with a stack and use the same representation on both the CPU and GPU.
+The renderer evaluates the tree iteratively in post-order using a stack. The CPU and GPU backends use the same tree representation.
 
 ### CPU and GPU memory
 
